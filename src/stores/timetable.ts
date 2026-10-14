@@ -4,16 +4,18 @@ import { api } from '../services/api';
 import { useUserStore } from './user';
 
 const COLOR_PALETTE = [
-  '#4F46E5', // 经典蓝
-  '#0ea5e9', // 天空蓝
-  '#10b981', // 翡翠绿
-  '#f59e0b', // 琥珀黄
-  '#8b5cf6', // 梦幻紫
-  '#ec4899', // 玫瑰粉
-  '#14b8a6', // 绿松石
-  '#f43f5e', // 珊瑚红
-  '#6366f1', // 靛蓝
-  '#06b6d4', // 青蓝
+  '#ff914d', // 活力橙 (如 概率论)
+  '#4caf50', // 清新绿 (如 毛概)
+  '#ba68c8', // 优雅紫 (如 习概)
+  '#42a5f5', // 经典蓝 (如 复变函数、大物)
+  '#ffa726', // 温暖黄 (如 体育、模电)
+  '#26a69a', // 湖水绿
+  '#ec407a', // 蔷薇粉
+  '#7e57c2', // 梦幻紫
+  '#29b6f6', // 浅天蓝
+  '#ef5350', // 珊瑚红 (如 劳动实践)
+  '#78909c', // 蓝灰 (如 工程概论、形策)
+  '#ab47bc', // 浅紫
 ];
 
 function getCourseColor(name: string): string {
@@ -48,15 +50,19 @@ export const useTimetableStore = defineStore('timetable', {
             ...curWeekCourse,
             isCurrentWeek: true,
             displayColor: curWeekCourse.color || getCourseColor(curWeekCourse.name),
+            hasConflict: matches.length > 1,
+            allCourses: matches,
           };
         }
 
-        // 非本周课程灰显展示
+        // 非本周课程展示 (灰色，降低透明度)
         const otherCourse = matches[0];
         return {
           ...otherCourse,
           isCurrentWeek: false,
-          displayColor: '#94a3b8',
+          displayColor: '#b0bec5',
+          hasConflict: matches.length > 1,
+          allCourses: matches,
         };
       };
     },
