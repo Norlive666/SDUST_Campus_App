@@ -243,30 +243,43 @@ class ApiService {
   }
 
   /**
-   * 6. 获取成绩
+   * 6. 获取成绩 (支持 POST / GET 双协议自适应兜底)
    */
   async getGrades(term: string = ''): Promise<GradeItem[]> {
     if (this.isMockMode) {
       return MOCK_GRADES;
     }
 
+    const kksj = term === 'all' ? '' : term;
+
     try {
+      // 策略 1: 标准 POST 请求
       const res = await http.request<string>({
         url: 'kscj/cjcx_list',
         method: 'POST',
         data: {
-          kksj: term === 'all' ? '' : term,
-          pageNum: '1',
-          pageSize: '999',
+          kksj: kksj,
           xsfs: 'all',
-          kcxz: '',
-          kcsx: '',
-          kcmc: '',
-          sfxsbcxq: '1',
         },
       });
 
-      return parseGradesHtml(res.data);
+      let parsed = parseGradesHtml(res.data);
+      if (parsed.length > 0) return parsed;
+
+      // 策略 2: 带参数的 GET 请求
+      const getRes = await http.request<string>({
+        url: `kscj/cjcx_list?kksj=${encodeURIComponent(kksj)}&xsfs=all`,
+        method: 'GET',
+      });
+      parsed = parseGradesHtml(getRes.data);
+      if (parsed.length > 0) return parsed;
+
+      // 策略 3: 默认无参 GET 请求（拉取默认学期）
+      const defaultRes = await http.request<string>({
+        url: 'kscj/cjcx_list',
+        method: 'GET',
+      });
+      return parseGradesHtml(defaultRes.data);
     } catch (e) {
       console.warn('获取成绩异常:', e);
       return [];
@@ -274,7 +287,7 @@ class ApiService {
   }
 
   /**
-   * 7. 获取考试日程
+   * 7. 获取考试日程 (支持 POST / GET 双协议自适应兜底)
    */
   async getExams(term: string = ''): Promise<ExamItem[]> {
     if (this.isMockMode) {
@@ -282,22 +295,28 @@ class ApiService {
     }
 
     try {
-      // 优先请求 xsksap_list
+      // 策略 1: POST 请求 xsks/xsksap_list
       const res = await http.request<string>({
         url: 'xsks/xsksap_list',
         method: 'POST',
         data: {
           xnxqid: term || '',
-          pageNum: '1',
-          pageSize: '999',
           xqlb: '',
         },
       });
 
-      const parsed = parseExamsHtml(res.data);
+      let parsed = parseExamsHtml(res.data);
       if (parsed.length > 0) return parsed;
 
-      // 备用请求 xsks_list
+      // 策略 2: GET 请求 xsks/xsksap_list
+      const getRes = await http.request<string>({
+        url: `xsks/xsksap_list?xnxqid=${encodeURIComponent(term || '')}`,
+        method: 'GET',
+      });
+      parsed = parseExamsHtml(getRes.data);
+      if (parsed.length > 0) return parsed;
+
+      // 策略 3: 备用 POST 请求 xsks/xsks_list
       const altRes = await http.request<string>({
         url: 'xsks/xsks_list',
         method: 'POST',

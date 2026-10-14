@@ -32,7 +32,7 @@ export interface GradeItem {
   term: string; // 学期 如 2026-2027-1
   code: string; // 课程编号
   name: string; // 课程名称
-  score: string; // 成绩 (如 92 或 优)
+  score: string; // 成绩 (如 88 或 优)
   credit: number; // 学分
   gpa: number; // 绩点
   type: string; // 课程属性 (必修/选修)
@@ -49,46 +49,76 @@ export interface ExamItem {
 }
 
 /**
- * 格式化拼接教学楼与教室，避免出现仅显示 "x号楼" 的问题
- * 例如:
- * building: "J1号教学楼", room: "102" -> "J1-102"
- * building: "J1号楼", room: "J1-102" -> "J1-102"
- * building: "1号楼", room: "102" -> "1号楼 102"
- * building: "", room: "J7-302" -> "J7-302"
+ * 智能解析山科大教务系统地点字符串为实际教室
+ * 规则：
+ * 1. "J1号教学楼(J1-102)" -> "J1-102"
+ * 2. "J1号楼(102)" -> "J1-102"
+ * 3. "1号楼(102)" -> "1号楼 102"
+ * 4. "J7教学楼(J7-205)" -> "J7-205"
+ * 5. "J14机电楼(205)" -> "J14-205"
+ * 6. "J1-102" -> "J1-102"
+ * 7. "J1号教学楼 J1-102" -> "J1-102"
+ * 8. "风雨操场" -> "风雨操场"
+ * 9. "J1号楼" -> "J1号楼" (若确实无房间号，保留楼号，绝不盲目转为"教室未定")
+ */
+export function extractClassroomFromPlace(rawPlace: string): string {
+  let text = (rawPlace || '').replace(/^[;,\s]*地点[:：]\s*/, '').trim();
+  if (!text) return '教室未定';
+
+  // 1. 处理带括号的格式: 如 "J1号教学楼(J1-102)", "J1号楼(102)", "1号楼(102)", "J7教学楼(J7-205)"
+  const parenMatch = text.match(/^(.*?)[（(]([^）)]+)[）)]/);
+  if (parenMatch) {
+    const building = parenMatch[1].trim();
+    const room = parenMatch[2].trim();
+
+    // 如果括号内的 room 已经包含了楼号前缀 (如 J1-102, J7-205)
+    if (/^[A-Za-z]\d+/.test(room)) {
+      return room;
+    }
+
+    // 提取楼号代码 (如 J1, J7, J14, 1)
+    const bCodeMatch = building.match(/([A-Za-z]+\d+|\d+)/);
+    const bCode = bCodeMatch ? bCodeMatch[1] : '';
+    if (bCode) {
+      if (/^[A-Za-z]/.test(bCode)) {
+        return `${bCode.toUpperCase()}-${room.replace(/^[A-Za-z]+[-–_]?/, '')}`;
+      } else {
+        return `${bCode}号楼 ${room}`;
+      }
+    }
+    return `${building} ${room}`;
+  }
+
+  // 2. 处理空格分隔: 如 "J1号教学楼 J1-102", "1号楼 102"
+  const parts = text.split(/\s+/);
+  if (parts.length >= 2) {
+    const building = parts[0];
+    const room = parts.slice(1).join(' ');
+    if (/^[A-Za-z]\d+/.test(room)) return room;
+    const bCodeMatch = building.match(/([A-Za-z]+\d+|\d+)/);
+    const bCode = bCodeMatch ? bCodeMatch[1] : '';
+    if (bCode && /^[A-Za-z]/.test(bCode)) {
+      return `${bCode.toUpperCase()}-${room}`;
+    }
+    return `${building} ${room}`;
+  }
+
+  // 3. 规范字符串直接返回 (如 "J1-102", "J7-302", "风雨操场", "J1号楼")
+  return text;
+}
+
+/**
+ * 格式化拼接教学楼与教室
  */
 export function formatClassroom(building: string, room: string): string {
-  building = (building || '').replace(/[()（）]/g, '').trim();
-  room = (room || '').replace(/[()（）]/g, '').trim();
+  building = (building || '').trim();
+  room = (room || '').trim();
 
   if (!building && !room) return '教室未定';
-  if (!building) return room;
-  if (!room) return building;
+  if (!building) return extractClassroomFromPlace(room);
+  if (!room) return extractClassroomFromPlace(building);
 
-  // 提取楼宇代号 (如 J1, J7, J14, S1, 1, 2)
-  const bCodeMatch = building.match(/([A-Za-z]+\d+|\d+)/);
-  const bCode = bCodeMatch ? bCodeMatch[1] : '';
-
-  // 如果 room 已经包含完整楼宇名称或代号
-  if (room.toLowerCase().includes(building.toLowerCase())) {
-    return room;
-  }
-  if (bCode && room.toUpperCase().startsWith(bCode.toUpperCase())) {
-    return room;
-  }
-
-  // 如果 room 只是纯数字房号（如 102, 201-1, 305）
-  if (bCode) {
-    if (/^[A-Za-z]/.test(bCode)) {
-      // 字母开头楼号 (如 J1, J7, J14)：直接规范化为 J1-102
-      return `${bCode.toUpperCase()}-${room.replace(/^[A-Za-z]+[-–_]?/, '')}`;
-    } else {
-      // 纯数字楼号 (如 1号楼 102)
-      return `${building} ${room}`;
-    }
-  }
-
-  // 默认使用空格合并 (如 体育馆 风雨操场, 综合楼 201)
-  return `${building} ${room}`;
+  return extractClassroomFromPlace(`${building}(${room})`);
 }
 
 /**
@@ -299,39 +329,54 @@ export function parseTimetableHtml(html: string): TimetableParseResult {
         const tooltipLis = cell.querySelectorAll('.qz-toolitiplists li');
         if (tooltipLis.length > 0) {
           tooltipLis.forEach((li) => {
-            const rawText = li.textContent || '';
-            const nameEl = li.querySelector('div') || li;
-            let name = nameEl.textContent?.trim() || '';
-            name = name.replace(/老师[:：].*/s, '').trim();
-
-            const teacherMatch = rawText.match(/(?:老师|教师)[:：]\s*([^\s;<\n]+)/);
-            const teacher = teacherMatch ? teacherMatch[1].trim() : '';
-
-            // 提取完整地点 (保留空格，例如 "J1号教学楼 J1-102" 或 "1号楼 102")
-            const placeMatch = rawText.match(/地点[:：]\s*([^;<\n]+?)(?=\s*(?:时间|老师|教师|周次|节次|$|<))/);
+            // 优先遍历 li 的子节点 div/item 精确提取每个字段
+            const subEls = Array.from(li.querySelectorAll('div, span, p'));
+            let name = li.querySelector('.qz-tooltipContent-title')?.textContent?.trim() || '';
+            let teacher = '';
+            let rawWeeks = '1-16周';
             let classroom = '';
-            if (placeMatch) {
-              const fullPlace = placeMatch[1].trim();
-              const parts = fullPlace.split(/\s+/);
-              if (parts.length >= 2) {
-                classroom = formatClassroom(parts[0], parts.slice(1).join(' '));
-              } else {
-                classroom = fullPlace;
+
+            for (const el of subEls) {
+              const t = el.textContent?.trim() || '';
+              if (!name && el.classList.contains('qz-tooltipContent-title')) {
+                name = t;
+              } else if (!teacher && (t.startsWith('老师：') || t.startsWith('老师:') || t.startsWith('教师：') || t.startsWith('教师:'))) {
+                teacher = t.replace(/^(?:老师|教师)[:：]\s*/, '').trim();
+              } else if (t.startsWith('时间：') || t.startsWith('时间:') || t.startsWith('周次：') || t.startsWith('周次:')) {
+                rawWeeks = t.replace(/^(?:时间|周次)[:：]\s*/, '').trim();
+              } else if (!classroom && (t.startsWith('地点：') || t.startsWith('地点:') || t.includes('地点：') || t.includes('地点:'))) {
+                classroom = extractClassroomFromPlace(t);
               }
             }
 
-            const weekMatch = rawText.match(/(?:时间|周次)[:：]\s*([^\s;<\n]+)/);
-            const rawWeeks = weekMatch ? weekMatch[1].trim() : '1-16周';
-            const weeks = parseWeekString(rawWeeks);
+            // 兜底全文提取
+            const liText = li.textContent || '';
+            if (!name) {
+              const nameEl = li.querySelector('div') || li;
+              name = nameEl.textContent?.trim() || '';
+              name = name.replace(/(?:老师|教师|时间|周次|地点|班级|编号)[:：].*/s, '').trim();
+            }
+            if (!teacher) {
+              const tm = liText.match(/(?:老师|教师)[:：]\s*([^\s;<\n]+)/);
+              if (tm) teacher = tm[1].trim();
+            }
+            if (rawWeeks === '1-16周') {
+              const wm = liText.match(/(?:时间|周次)[:：]\s*([^\s;<\n]+)/);
+              if (wm) rawWeeks = wm[1].trim();
+            }
+            if (!classroom) {
+              const pm = liText.match(/地点[:：]\s*([^\s;<\n]+(?:[（(][^）)]+[）)])?)/);
+              if (pm) classroom = extractClassroomFromPlace(pm[0]);
+            }
 
-            // 解析节次
+            const weeks = parseWeekString(rawWeeks);
             let sec = sectionIndex;
             const secMatch = rawWeeks.match(/\[(\d+)-(\d+)节?\]/);
             if (secMatch) {
               sec = Math.floor((parseInt(secMatch[1], 10) - 1) / 2);
             }
 
-            if (name) {
+            if (name && weeks.length > 0) {
               courses.push({
                 day,
                 section: sec,
@@ -347,7 +392,6 @@ export function parseTimetableHtml(html: string): TimetableParseResult {
           // 策略 B: 提取 .kbcontent / .kbcontent1
           const kbItems = cell.querySelectorAll('.kbcontent, .kbcontent1');
           kbItems.forEach((item) => {
-            // 跳过隐藏或占位的简版
             const el = item as HTMLElement;
             if (el.style && el.style.display === 'none') return;
             if (el.classList.contains('sykb2')) return;
@@ -355,7 +399,7 @@ export function parseTimetableHtml(html: string): TimetableParseResult {
             const htmlContent = item.innerHTML.trim();
             if (!htmlContent || htmlContent === '&nbsp;' || htmlContent.length < 5) return;
 
-            // 分割多门课的分隔线 (如 "---------------------")
+            // 分割同时间段不同周次的多门课 (分隔线如 "---------------------")
             const blocks = htmlContent.split(/<br\s*\/?>\s*[-—]{5,}\s*<br\s*\/?>|[-—]{10,}/i);
 
             blocks.forEach((block) => {
@@ -364,39 +408,33 @@ export function parseTimetableHtml(html: string): TimetableParseResult {
               const blockDiv = document.createElement('div');
               blockDiv.innerHTML = block;
 
-              // 优先从带 title 的标签中精准提取
-              const teacherEl = blockDiv.querySelector('font[title="老师"], font[title="教师"], span[title="老师"], span[title="教师"]');
+              // 优先查找带 title 的 font 标签
+              const teacherEl = blockDiv.querySelector('font[title="老师"], font[title="教师"], span[title="老师"]');
               const teacher = teacherEl ? teacherEl.textContent?.trim() || '' : '';
 
-              const weekEl = blockDiv.querySelector('font[title="周次(节次)"], font[title="时间"], span[title="周次(节次)"]');
+              const weekEl = blockDiv.querySelector('font[title="周次(节次)"], font[title="时间"]');
               const weekRaw = weekEl ? weekEl.textContent?.trim() || '' : '';
 
-              const buildingEl = blockDiv.querySelector('font[title="教学楼"], font[title="校区"], span[title="教学楼"]');
-              const building = buildingEl ? buildingEl.textContent?.trim() || '' : '';
-
-              const roomEl = blockDiv.querySelector('font[title="教室"], font[title="地点"], span[title="教室"]');
-              const room = roomEl ? roomEl.textContent?.trim() || '' : '';
+              const roomEl = blockDiv.querySelector('font[title="教室"], font[title="地点"]');
+              const buildingEl = blockDiv.querySelector('font[title="教学楼"], font[title="校区"]');
 
               let classroom = '';
-              if (building || room) {
-                classroom = formatClassroom(building, room);
+              if (roomEl || buildingEl) {
+                const bText = buildingEl?.textContent?.trim() || '';
+                const rText = roomEl?.textContent?.trim() || '';
+                classroom = formatClassroom(bText, rText);
               }
 
-              // 提取课程名称 (第一行无 title 的文本)
-              let name = '';
-              const firstLine = block.split(/<br\s*\/?>/i)[0];
-              const nameHolder = document.createElement('div');
-              nameHolder.innerHTML = firstLine;
-              name = nameHolder.textContent?.replace(/&nbsp;/g, '').replace(/[●★○]/g, '').trim() || '';
-
-              // 如果标签未标记 title，进行按行兜底解析
+              // 按 <br> 分割各行信息
               const lines = block
                 .split(/<br\s*\/?>/i)
                 .map((l) => l.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim())
                 .filter(Boolean);
 
-              if (!name && lines.length > 0) {
-                name = lines[0];
+              let name = '';
+              const firstLine = lines[0] || '';
+              if (firstLine && !firstLine.includes('节次') && !firstLine.includes('周')) {
+                name = firstLine;
               }
 
               let finalTeacher = teacher;
@@ -412,21 +450,13 @@ export function parseTimetableHtml(html: string): TimetableParseResult {
               }
 
               if (!classroom) {
-                // 查找楼宇行与房号行
-                const buildingLine = lines.find((l) => /[JjA-Za-z]?\d+号?楼|[教学机电实验综合理科]+楼/.test(l)) || '';
-                const roomLine = lines.find((l) => /[JjA-Za-z]\d+[-–]\d+|\b\d{3,4}\b|[0-9]+教室|操场|机房|馆/.test(l)) || '';
-
-                if (buildingLine && roomLine && buildingLine !== roomLine) {
-                  classroom = formatClassroom(buildingLine, roomLine);
-                } else if (buildingLine && !roomLine) {
-                  // 只有楼宇行，检查后面是否有纯数字
-                  classroom = buildingLine;
-                } else if (roomLine) {
-                  classroom = roomLine;
+                // 查找包含地点的行
+                const placeLine = lines.find((l) => l.includes('地点') || l.includes('楼') || l.includes('教室') || /[JjA-Za-z]\d+[-–]\d+/.test(l));
+                if (placeLine) {
+                  classroom = extractClassroomFromPlace(placeLine);
                 }
               }
 
-              // 计算适用周次与节次
               const rawWeeks = (finalWeekRaw || '1-16周').split('[')[0].trim();
               const weeks = parseWeekString(rawWeeks);
 
@@ -462,7 +492,7 @@ export function parseTimetableHtml(html: string): TimetableParseResult {
 }
 
 /**
- * 成绩 HTML 解析
+ * 成绩 HTML 解析 (动态列探测，杜绝全 0 与空白)
  */
 export function parseGradesHtml(html: string): GradeItem[] {
   const grades: GradeItem[] = [];
@@ -474,44 +504,127 @@ export function parseGradesHtml(html: string): GradeItem[] {
     const table = doc.querySelector('#dataList') || doc.querySelector('table');
     if (!table) return grades;
 
-    const rows = table.querySelectorAll('tbody tr, tr');
-    rows.forEach((row) => {
-      const tds = row.querySelectorAll('td');
-      if (tds.length < 5) return;
+    const rows = Array.from(table.querySelectorAll('tr'));
+    if (rows.length < 2) return grades;
 
-      const term = tds[1]?.textContent?.trim() || '';
-      if (!term || term.includes('学期') || term.includes('开课')) return;
+    // 1. 动态探测表头各列索引，杜绝硬编码错位
+    let headerRowIndex = 0;
+    const colMap: Record<string, number> = {
+      term: -1,
+      code: -1,
+      name: -1,
+      score: -1,
+      credit: -1,
+      gpa: -1,
+      type: -1,
+      examType: -1,
+    };
 
-      const code = tds[2]?.textContent?.trim() || '';
-      const name = tds[3]?.textContent?.trim() || '';
-      const score = tds[4]?.textContent?.trim() || '';
-      const credit = parseFloat(tds[5]?.textContent?.trim() || '0') || 0;
-      const gpa = parseFloat(tds[7]?.textContent?.trim() || tds[6]?.textContent?.trim() || '0') || 0;
-      const type = tds[8]?.textContent?.trim() || tds[7]?.textContent?.trim() || '必修';
-      const examType = tds[9]?.textContent?.trim() || '考试';
+    for (let r = 0; r < Math.min(rows.length, 3); r++) {
+      const ths = rows[r].querySelectorAll('th, td');
+      let foundHeader = false;
+      ths.forEach((th, idx) => {
+        const text = th.textContent?.trim() || '';
+        if (text.includes('学期')) { colMap.term = idx; foundHeader = true; }
+        else if (text.includes('课程编号') || text.includes('课程序号')) { colMap.code = idx; foundHeader = true; }
+        else if (text.includes('课程名称') || text.includes('课程名')) { colMap.name = idx; foundHeader = true; }
+        else if (text.includes('成绩') || text.includes('分数') || text.includes('总评')) {
+          if (!text.includes('标识') && !text.includes('性质') && !text.includes('方式')) {
+            colMap.score = idx;
+            foundHeader = true;
+          }
+        } else if (text.includes('学分') && !text.includes('绩点')) {
+          colMap.credit = idx;
+          foundHeader = true;
+        } else if (text.includes('绩点')) {
+          colMap.gpa = idx;
+          foundHeader = true;
+        } else if (text.includes('属性') || text.includes('性质')) {
+          colMap.type = idx;
+          foundHeader = true;
+        } else if (text.includes('方式')) {
+          colMap.examType = idx;
+          foundHeader = true;
+        }
+      });
+      if (foundHeader && (colMap.name !== -1 || colMap.score !== -1)) {
+        headerRowIndex = r;
+        break;
+      }
+    }
+
+    // 2. 遍历数据行
+    for (let r = headerRowIndex + 1; r < rows.length; r++) {
+      const tds = rows[r].querySelectorAll('td');
+      if (tds.length < 4) continue;
+
+      const rowText = rows[r].textContent || '';
+      if (rowText.includes('所修总学分') || rowText.includes('平均学分绩点') || rowText.includes('选课学分')) {
+        continue;
+      }
+
+      const getColText = (colKey: string, fallbackIdx: number): string => {
+        const idx = colMap[colKey] !== -1 ? colMap[colKey] : fallbackIdx;
+        return tds[idx]?.textContent?.trim() || '';
+      };
+
+      const term = getColText('term', 1);
+      const code = getColText('code', 2);
+      const name = getColText('name', 3);
+      const score = getColText('score', 4);
+      let credit = parseFloat(getColText('credit', 6)) || 0;
+      let gpa = parseFloat(getColText('gpa', 8)) || 0;
+      const type = getColText('type', 10) || '必修';
+      const examType = getColText('examType', 9) || '考试';
+
+      if (!name || name.includes('课程名称') || name.includes('序号') || name === '无') continue;
+
+      // 如果未识别到学分，尝试在所有列中寻找合理的学分数值 (0.5 ~ 10.0)
+      if (credit === 0) {
+        for (let i = 4; i < tds.length; i++) {
+          const val = parseFloat(tds[i].textContent?.trim() || '0');
+          if (!isNaN(val) && val >= 0.5 && val <= 10.0 && val !== parseFloat(score)) {
+            credit = val;
+            break;
+          }
+        }
+      }
+
+      // 自动绩点换算（如教务系统未返回独立绩点列，按山科大标准 5 分制推算）
+      const numScore = parseFloat(score);
+      if (gpa === 0 && !isNaN(numScore)) {
+        if (numScore >= 60) {
+          gpa = parseFloat(((numScore - 60) / 10 + 1).toFixed(1));
+        } else {
+          gpa = 0.0;
+        }
+      } else if (gpa === 0) {
+        if (score === '优') gpa = 4.5;
+        else if (score === '良') gpa = 3.5;
+        else if (score === '中') gpa = 2.5;
+        else if (score === '及格') gpa = 1.5;
+        else if (score === '不及格') gpa = 0.0;
+      }
 
       let isPass = true;
-      const numScore = parseFloat(score);
       if (!isNaN(numScore)) {
         isPass = numScore >= 60;
       } else if (score === '不及格' || score === '不合格') {
         isPass = false;
       }
 
-      if (name) {
-        grades.push({
-          term,
-          code,
-          name,
-          score,
-          credit,
-          gpa,
-          type,
-          examType,
-          isPass,
-        });
-      }
-    });
+      grades.push({
+        term: term || '当前学期',
+        code,
+        name,
+        score: score || '0',
+        credit: credit || 1.0,
+        gpa,
+        type,
+        examType,
+        isPass,
+      });
+    }
   } catch (e) {
     console.error('成绩解析异常:', e);
   }
@@ -551,7 +664,7 @@ export function parseExamsHtml(html: string): ExamItem[] {
         if (/\d{4}-\d{2}-\d{2}/.test(txt) || /\d{2}:\d{2}/.test(txt)) {
           time = txt;
         } else if (/[JjA-Za-z]\d+/.test(txt) || txt.includes('教学楼') || txt.includes('考场') || txt.includes('楼')) {
-          location = txt;
+          location = extractClassroomFromPlace(txt);
         } else if (/^\d+$/.test(txt) && parseInt(txt, 10) > 0 && parseInt(txt, 10) < 150) {
           seat = txt;
         }
