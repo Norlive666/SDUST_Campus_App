@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { CourseItem } from '../services/parser';
 import { api } from '../services/api';
+import { useUserStore } from './user';
 
 const COLOR_PALETTE = [
   '#4F46E5', // 经典蓝
@@ -27,17 +28,13 @@ function getCourseColor(name: string): string {
 export const useTimetableStore = defineStore('timetable', {
   state: () => ({
     courses: [] as CourseItem[],
-    selectedWeek: 6,
+    selectedWeek: 7,
     isLoading: false,
   }),
 
   getters: {
-    /**
-     * 获取指定周次中、指定星期 (0-6) 和节次 (0-4) 的课程列表
-     */
     getCourseAt: (state) => {
       return (day: number, section: number, week: number) => {
-        // 查找所有在该星期、该节次上课的课程
         const matches = state.courses.filter(
           (c) => c.day === day && c.section === section
         );
@@ -54,21 +51,18 @@ export const useTimetableStore = defineStore('timetable', {
           };
         }
 
-        // 如果当前周没课，但其它周有课（非本周课程置灰）
+        // 非本周课程灰显展示
         const otherCourse = matches[0];
         return {
           ...otherCourse,
           isCurrentWeek: false,
-          displayColor: '#94a3b8', // 灰色展示
+          displayColor: '#94a3b8',
         };
       };
     },
 
-    /**
-     * 今日课程
-     */
     todayCourses: (state) => {
-      const today = (new Date().getDay() + 6) % 7; // 转换成 0=周一 ... 6=周日
+      const today = (new Date().getDay() + 6) % 7;
       return state.courses
         .filter((c) => c.day === today && c.weeks.includes(state.selectedWeek))
         .sort((a, b) => a.section - b.section);
@@ -91,12 +85,23 @@ export const useTimetableStore = defineStore('timetable', {
       } catch (_) {}
     },
 
-    async fetchTimetable(term: string) {
+    async fetchTimetable(term: string = '') {
       this.isLoading = true;
+      const userStore = useUserStore();
       try {
-        const data = await api.getTimetable(term);
-        // 分配颜色
-        this.courses = data.map((c) => ({
+        const result = await api.getTimetable(term);
+
+        // 如果服务端返回了真实当前学期与当前教学周，自动同步校准
+        if (result.currentTerm) {
+          userStore.setCurTerm(result.currentTerm);
+        }
+        if (result.currentWeek && result.currentWeek > 0) {
+          userStore.setCurWeek(result.currentWeek);
+          this.selectedWeek = result.currentWeek;
+        }
+
+        // 分配课程卡片颜色
+        this.courses = result.courses.map((c) => ({
           ...c,
           color: getCourseColor(c.name),
         }));

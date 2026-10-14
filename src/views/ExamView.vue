@@ -73,7 +73,7 @@ const nearestExam = computed(() => {
 
 const loadExams = async () => {
   try {
-    const data = await api.getExams(userStore.curTerm);
+    const data = await api.getExams(userStore.curTerm || '');
     exams.value = data;
     try {
       localStorage.setItem('shst_exams', JSON.stringify(data));

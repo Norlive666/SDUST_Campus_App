@@ -93,10 +93,13 @@ const selectedTerm = ref('all');
 
 const termOptions = [
   { name: '全部学期', value: 'all' },
+  { name: '2026-2027-1 (当前)', value: '2026-2027-1' },
+  { name: '2025-2026-2', value: '2025-2026-2' },
+  { name: '2025-2026-1', value: '2025-2026-1' },
+  { name: '2024-2025-2', value: '2024-2025-2' },
   { name: '2024-2025-1', value: '2024-2025-1' },
   { name: '2023-2024-2', value: '2023-2024-2' },
   { name: '2023-2024-1', value: '2023-2024-1' },
-  { name: '2022-2023-2', value: '2022-2023-2' },
 ];
 
 const selectedTermLabel = computed(() => {

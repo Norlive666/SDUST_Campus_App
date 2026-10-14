@@ -11,14 +11,24 @@
           <van-tag v-if="userStore.isMockMode" type="warning" size="medium">演示模式</van-tag>
           <van-tag v-else type="success" size="medium">已认证</van-tag>
         </div>
-        <div class="user-detail">{{ userStore.college }} · {{ userStore.major }}</div>
-        <div class="user-id">学号: {{ userStore.account || '未登录' }}</div>
+        <div class="user-detail">{{ userStore.college }} · {{ userStore.major || '全日制学生' }}</div>
+        <div class="user-id">
+          <span>学号: {{ userStore.account || '未登录' }}</span>
+          <span v-if="userStore.className" class="class-name">（{{ userStore.className }}）</span>
+        </div>
       </div>
     </div>
 
     <!-- 常用设置单元格组 -->
     <div class="menu-group">
       <van-cell-group inset title="教务设置">
+        <van-cell
+          title="同步教务学籍信息"
+          value="刷新信息"
+          is-link
+          @click="onSyncStudentInfo"
+          icon="replay"
+        />
         <van-cell
           title="当前学期"
           :value="userStore.curTerm"
@@ -109,12 +119,13 @@
         <p>本项目基于开源生态 <code>WindrunnerMax/SHST</code>，采用 Vue 3 + Vant + Capacitor 原生跨端技术重构为 Android 原生体验应用。</p>
         <p><strong>特性：</strong></p>
         <ul>
+          <li>内置图像字模二值化引擎，验证码全自动识别</li>
           <li>全链路原生 HTTPS / Cookie 会话保持</li>
           <li>课表、成绩离线缓存，断网秒开</li>
           <li>GPA / 加权均分实时动态换算</li>
           <li>自适应 Android 沉浸式状态栏与手势</li>
         </ul>
-        <p class="copyright">山科大开源贡献 · 2024</p>
+        <p class="copyright">山科大开源贡献 · 2026</p>
       </div>
     </van-dialog>
   </div>
@@ -126,6 +137,7 @@ import { useRouter } from 'vue-router';
 import { showToast, showConfirmDialog } from 'vant';
 import { useUserStore } from '../stores/user';
 import { useTimetableStore } from '../stores/timetable';
+import { api } from '../services/api';
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -136,11 +148,27 @@ const showWeekSheet = ref(false);
 const showAboutDialog = ref(false);
 
 const termOptions = [
-  { name: '2024-2025-1 (当前)', value: '2024-2025-1' },
-  { name: '2023-2024-2', value: '2023-2024-2' },
-  { name: '2023-2024-1', value: '2023-2024-1' },
-  { name: '2022-2023-2', value: '2022-2023-2' },
+  { name: '2026-2027-1 (当前)', value: '2026-2027-1' },
+  { name: '2025-2026-2', value: '2025-2026-2' },
+  { name: '2025-2026-1', value: '2025-2026-1' },
+  { name: '2024-2025-2', value: '2024-2025-2' },
+  { name: '2024-2025-1', value: '2024-2025-1' },
 ];
+
+const onSyncStudentInfo = async () => {
+  showToast({ type: 'loading', message: '同步中...', forbidClick: true });
+  try {
+    const info = await api.getStudentInfo();
+    if (info && (info.name || info.college)) {
+      userStore.updateStudentInfo(info);
+      showToast({ type: 'success', message: '学籍信息已更新' });
+    } else {
+      showToast('未检测到新学籍，保持现有信息');
+    }
+  } catch (_) {
+    showToast('同步学籍失败');
+  }
+};
 
 const toggleMock = (val: boolean) => {
   userStore.setMockMode(val);
@@ -245,6 +273,10 @@ const onLogout = () => {
 .user-id {
   font-size: 12px;
   opacity: 0.75;
+}
+
+.class-name {
+  opacity: 0.85;
 }
 
 .menu-group {

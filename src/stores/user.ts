@@ -1,17 +1,20 @@
 import { defineStore } from 'pinia';
 import { api } from '../services/api';
 import { MOCK_USER } from '../services/mock';
+import { calculateCurrentTermAndWeek, StudentInfo } from '../services/parser';
+
+const initialTermAndWeek = calculateCurrentTermAndWeek();
 
 export const useUserStore = defineStore('user', {
   state: () => ({
     isLoggedIn: false,
     account: '',
     name: '山科同学',
-    college: '计算机科学与工程学院',
-    major: '软件工程',
-    className: '软工2022-1班',
-    curTerm: '2024-2025-1',
-    curWeek: 6,
+    college: '山东科技大学',
+    major: '本科专业',
+    className: '',
+    curTerm: initialTermAndWeek.term, // 动态推算当前学期 如 2026-2027-1
+    curWeek: initialTermAndWeek.week, // 动态推算当前第几周
     isMockMode: false,
   }),
 
@@ -23,6 +26,11 @@ export const useUserStore = defineStore('user', {
           const parsed = JSON.parse(saved);
           Object.assign(this, parsed);
           api.isMockMode = this.isMockMode;
+        } else {
+          // 根据当前日期动态初始化
+          const current = calculateCurrentTermAndWeek();
+          this.curTerm = current.term;
+          this.curWeek = current.week;
         }
       } catch (_) {}
     },
@@ -74,15 +82,32 @@ export const useUserStore = defineStore('user', {
       if (res.success) {
         this.isLoggedIn = true;
         this.account = account;
-        this.name = `用户 ${account.slice(-4)}`;
+
+        if (res.studentInfo) {
+          if (res.studentInfo.name) this.name = res.studentInfo.name;
+          if (res.studentInfo.college) this.college = res.studentInfo.college;
+          if (res.studentInfo.major) this.major = res.studentInfo.major;
+          if (res.studentInfo.className) this.className = res.studentInfo.className;
+        }
         this.save();
       }
       return res;
     },
 
+    updateStudentInfo(info: Partial<StudentInfo>) {
+      if (info.name) this.name = info.name;
+      if (info.college) this.college = info.college;
+      if (info.major) this.major = info.major;
+      if (info.className) this.className = info.className;
+      this.save();
+    },
+
     logout() {
       this.isLoggedIn = false;
       this.account = '';
+      this.name = '山科同学';
+      this.college = '山东科技大学';
+      this.major = '本科专业';
       this.save();
       localStorage.removeItem('shst_timetable');
       localStorage.removeItem('shst_grades');

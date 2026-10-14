@@ -48,7 +48,7 @@
             v-model="captcha"
             name="captcha"
             label="验证码"
-            placeholder="输入右侧验证码"
+            placeholder="正在自动识别..."
             maxlength="6"
             :rules="[{ required: true, message: '请填写验证码' }]"
           >
@@ -56,13 +56,18 @@
               <van-icon name="shield-o" class="field-icon" />
             </template>
             <template #button>
-              <div class="captcha-img-box" @click="loadCaptcha">
+              <div class="captcha-img-box" @click="loadCaptcha" title="点击刷新验证码">
                 <img v-if="captchaBase64" :src="captchaBase64" alt="验证码" class="captcha-img" />
                 <span v-else class="captcha-loading">加载中</span>
               </div>
             </template>
           </van-field>
         </van-cell-group>
+
+        <div v-if="autoRecognized" class="auto-ocr-hint">
+          <van-icon name="passed" class="text-green" />
+          <span>已自动为您识别验证码 (点击图片可刷新)</span>
+        </div>
 
         <div class="btn-group">
           <van-button
@@ -95,8 +100,8 @@
           <span>山科大教务特别说明</span>
         </div>
         <p>1. 账号密码与学校强智教务系统 (jwglxt.sdust.edu.cn) 一致。</p>
-        <p>2. 系统采用端对端原生加密与本地 Cookie 存储，不会在任何第三方服务器保存您的账号密码。</p>
-        <p>3. 若您当前未连接校园网或在外网访问受阻，推荐直接点击“一键体验/演示模式”进入系统。</p>
+        <p>2. 内置智能验证码识别引擎，已为您自动识别填入，无需费力辨认。</p>
+        <p>3. 登录后将自动拉取您的真实学期、院系、课表和考试安排。</p>
       </div>
     </div>
   </div>
@@ -107,6 +112,7 @@ import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { showToast, showNotify } from 'vant';
 import { api } from '../services/api';
+import { recognizeVerifyCode } from '../services/captcha';
 import { useUserStore } from '../stores/user';
 import { useTimetableStore } from '../stores/timetable';
 
@@ -118,12 +124,21 @@ const account = ref('');
 const password = ref('');
 const captcha = ref('');
 const captchaBase64 = ref('');
+const autoRecognized = ref(false);
 const showPassword = ref(false);
 const loading = ref(false);
 
 const loadCaptcha = async () => {
+  autoRecognized.value = false;
   try {
-    captchaBase64.value = await api.getCaptchaBase64();
+    const b64 = await api.getCaptchaBase64();
+    captchaBase64.value = b64;
+    // 自动图像识别验证码
+    const code = await recognizeVerifyCode(b64);
+    if (code && code.length === 4) {
+      captcha.value = code;
+      autoRecognized.value = true;
+    }
   } catch (e: any) {
     showToast('验证码刷新失败，请检查网络');
   }
@@ -134,8 +149,9 @@ const onSubmit = async () => {
   try {
     const res = await userStore.login(account.value, password.value, captcha.value, false);
     if (res.success) {
-      showToast({ type: 'success', message: '登录成功' });
-      await timetableStore.fetchTimetable(userStore.curTerm);
+      showToast({ type: 'success', message: `欢迎回来，${userStore.name}` });
+      // 传入空字符串，教务系统自动拉取学生当前正在上课的学期
+      await timetableStore.fetchTimetable('');
       router.replace('/timetable');
     } else {
       showNotify({ type: 'warning', message: res.message || '登录失败，请重试' });
@@ -218,7 +234,7 @@ onMounted(() => {
 }
 
 .form-group {
-  margin: 0 0 16px;
+  margin: 0 0 8px;
   border-radius: 16px;
   border: 1px solid #f1f5f9;
 }
@@ -253,8 +269,17 @@ onMounted(() => {
   color: #94a3b8;
 }
 
+.auto-ocr-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 16px;
+  font-size: 11px;
+  color: #10b981;
+}
+
 .btn-group {
-  margin-top: 24px;
+  margin-top: 18px;
 }
 
 .submit-btn {
@@ -291,5 +316,9 @@ onMounted(() => {
   color: #4f46e5;
   font-weight: 600;
   margin-bottom: 6px;
+}
+
+.text-green {
+  color: #10b981;
 }
 </style>

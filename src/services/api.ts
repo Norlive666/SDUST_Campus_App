@@ -4,9 +4,13 @@ import {
   parseTimetableHtml,
   parseGradesHtml,
   parseExamsHtml,
+  parseStudentInfoHtml,
+  calculateCurrentTermAndWeek,
   CourseItem,
   GradeItem,
   ExamItem,
+  StudentInfo,
+  TimetableParseResult,
 } from './parser';
 import {
   MOCK_USER,
@@ -24,6 +28,7 @@ export interface PreLoginInfo {
 export interface LoginResult {
   success: boolean;
   message?: string;
+  studentInfo?: Partial<StudentInfo>;
 }
 
 class ApiService {
@@ -58,7 +63,7 @@ class ApiService {
       }
       throw new Error('未能在页面中匹配到 scode / sxh 加密参数');
     } catch (e: any) {
-      console.warn('获取前置登录参数失败，可能处于内网或外网未连通:', e.message);
+      console.warn('获取前置登录参数失败:', e.message);
       throw e;
     }
   }
@@ -68,7 +73,6 @@ class ApiService {
    */
   async getCaptchaBase64(): Promise<string> {
     if (this.isMockMode) {
-      // 演示模式返回一个通用占位验证码图 (SVG Base64)
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40" viewBox="0 0 100 40"><rect width="100" height="40" fill="#f3f4f6"/><text x="25" y="26" font-family="monospace" font-size="20" font-weight="bold" fill="#4F46E5">8866</text></svg>`;
       return `data:image/svg+xml;base64,${btoa(svg)}`;
     }
@@ -81,7 +85,6 @@ class ApiService {
         params: { _t: Date.now() },
       });
 
-      // 转换 ArrayBuffer 为 Base64
       let binary = '';
       const bytes = new Uint8Array(res.data);
       for (let i = 0; i < bytes.byteLength; i++) {
@@ -99,7 +102,7 @@ class ApiService {
    */
   async login(account: string, pass: string, code: string): Promise<LoginResult> {
     if (this.isMockMode) {
-      return { success: true };
+      return { success: true, studentInfo: MOCK_USER };
     }
 
     if (!this.lastPreInfo) {
@@ -129,12 +132,20 @@ class ApiService {
         text.includes('个人中心') ||
         text.includes('退出登录') ||
         text.includes('xsMainV') ||
-        text.includes('framework/xsMain')
+        text.includes('framework/xsMain') ||
+        text.includes('jsxsd')
       ) {
-        return { success: true };
+        // 登录成功后，立即拉取学生信息
+        let studentInfo: Partial<StudentInfo> = { account };
+        try {
+          const info = await this.getStudentInfo();
+          if (info) studentInfo = { ...studentInfo, ...info };
+        } catch (_) {}
+
+        return { success: true, studentInfo };
       }
 
-      // 提取错误提示 (强智系统多用 <font color="red">...</font> 或 alert)
+      // 提取错误提示
       const fontMatch = text.match(/<font[^>]*color=["']?red["']?[^>]*>(.*?)<\/font>/i);
       const alertMatch = text.match(/alert\(['"](.*?)['"]\)/);
       const msg = fontMatch ? fontMatch[1] : alertMatch ? alertMatch[1] : '账号、密码或验证码有误';
@@ -146,11 +157,42 @@ class ApiService {
   }
 
   /**
-   * 4. 获取课表
+   * 4. 获取学生个人信息 (学院、专业、姓名)
    */
-  async getTimetable(term: string): Promise<CourseItem[]> {
+  async getStudentInfo(): Promise<Partial<StudentInfo> | null> {
+    if (this.isMockMode) return MOCK_USER;
+
+    try {
+      // 方式 1: 请求 grxx/xsxx
+      const res = await http.request<string>({
+        url: 'grxx/xsxx',
+        method: 'GET',
+      });
+      const info = parseStudentInfoHtml(res.data);
+      if (info.name || info.college) return info;
+
+      // 方式 2: 备用请求 framework/xsMainV.htmlx
+      const mainRes = await http.request<string>({
+        url: 'framework/xsMainV.htmlx',
+        method: 'GET',
+      });
+      return parseStudentInfoHtml(mainRes.data);
+    } catch (e) {
+      console.warn('获取个人信息失败:', e);
+      return null;
+    }
+  }
+
+  /**
+   * 5. 获取课表
+   */
+  async getTimetable(term: string = ''): Promise<TimetableParseResult> {
     if (this.isMockMode) {
-      return MOCK_COURSES;
+      return {
+        courses: MOCK_COURSES,
+        currentTerm: MOCK_USER.curTerm,
+        currentWeek: MOCK_USER.curWeek,
+      };
     }
 
     try {
@@ -158,7 +200,7 @@ class ApiService {
         url: 'xskb/xskb_list.do',
         method: 'POST',
         data: {
-          xnxq01id: term,
+          xnxq01id: term || '', // 为空时自动默认当前正在进行学期
           sfFD: '1',
           viweType: '0',
           showallprint: '0',
@@ -170,15 +212,20 @@ class ApiService {
         },
       });
 
-      return parseTimetableHtml(res.data);
+      const parsed = parseTimetableHtml(res.data);
+      if (parsed.courses.length === 0) {
+        // 如果特定学期无课，但在 HTML 里未报错，返回解析结果
+        return parsed;
+      }
+      return parsed;
     } catch (e) {
-      console.warn('获取课表异常，返回离线/演示课表:', e);
-      return MOCK_COURSES;
+      console.warn('获取课表异常:', e);
+      return { courses: [] };
     }
   }
 
   /**
-   * 5. 获取成绩
+   * 6. 获取成绩
    */
   async getGrades(term: string = ''): Promise<GradeItem[]> {
     if (this.isMockMode) {
@@ -203,13 +250,13 @@ class ApiService {
 
       return parseGradesHtml(res.data);
     } catch (e) {
-      console.warn('获取成绩异常，返回离线/演示成绩:', e);
-      return MOCK_GRADES;
+      console.warn('获取成绩异常:', e);
+      return [];
     }
   }
 
   /**
-   * 6. 获取考试日程
+   * 7. 获取考试日程
    */
   async getExams(term: string = ''): Promise<ExamItem[]> {
     if (this.isMockMode) {
@@ -217,26 +264,36 @@ class ApiService {
     }
 
     try {
+      // 优先请求 xsksap_list
       const res = await http.request<string>({
         url: 'xsks/xsksap_list',
         method: 'POST',
         data: {
-          xnxqid: term,
+          xnxqid: term || '',
           pageNum: '1',
           pageSize: '999',
           xqlb: '',
         },
       });
 
-      return parseExamsHtml(res.data);
+      const parsed = parseExamsHtml(res.data);
+      if (parsed.length > 0) return parsed;
+
+      // 备用请求 xsks_list
+      const altRes = await http.request<string>({
+        url: 'xsks/xsks_list',
+        method: 'POST',
+        data: { xnxqid: term || '' },
+      });
+      return parseExamsHtml(altRes.data);
     } catch (e) {
-      console.warn('获取考试异常，返回离线/演示日程:', e);
-      return MOCK_EXAMS;
+      console.warn('获取考试异常:', e);
+      return [];
     }
   }
 
   /**
-   * 7. 空教室查询
+   * 8. 空教室查询
    */
   async getClassrooms(): Promise<typeof MOCK_CLASSROOMS> {
     return MOCK_CLASSROOMS;

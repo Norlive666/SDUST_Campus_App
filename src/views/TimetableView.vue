@@ -68,6 +68,11 @@
           </div>
         </div>
       </div>
+
+      <div v-if="timetableStore.courses.length === 0 && !timetableStore.isLoading" class="empty-hint">
+        <van-icon name="info-o" />
+        <span>当前学期暂未查询到课表，可下拉刷新或在“我的”中切换学期</span>
+      </div>
     </van-pull-refresh>
 
     <!-- 周次选择器弹窗 -->
@@ -181,7 +186,7 @@ const getSectionDesc = (sec: number): string => {
 
 const onRefresh = async () => {
   try {
-    await timetableStore.fetchTimetable(userStore.curTerm);
+    await timetableStore.fetchTimetable(userStore.curTerm || '');
     showToast({ type: 'success', message: '课表已同步' });
   } catch (_) {
     showToast('同步失败，请检查网络');
@@ -195,7 +200,7 @@ onMounted(() => {
   timetableStore.init();
   timetableStore.selectedWeek = userStore.curWeek;
   if (timetableStore.courses.length === 0) {
-    timetableStore.fetchTimetable(userStore.curTerm);
+    timetableStore.fetchTimetable(userStore.curTerm || '');
   }
 });
 </script>
@@ -477,5 +482,18 @@ onMounted(() => {
 .detail-item .val {
   color: #1e293b;
   font-weight: 600;
+}
+
+.empty-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 20px 16px;
+  padding: 12px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #64748b;
 }
 </style>
