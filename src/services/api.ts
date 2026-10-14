@@ -5,7 +5,6 @@ import {
   parseGradesHtml,
   parseExamsHtml,
   parseStudentInfoHtml,
-  calculateCurrentTermAndWeek,
   CourseItem,
   GradeItem,
   ExamItem,
@@ -70,27 +69,42 @@ class ApiService {
 
   /**
    * 2. 获取图片验证码 (转换为 Base64)
+   * 无论在 Web 还是 Android Capacitor 原生环境均做严格适配
    */
   async getCaptchaBase64(): Promise<string> {
-    if (this.isMockMode) {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40" viewBox="0 0 100 40"><rect width="100" height="40" fill="#f3f4f6"/><text x="25" y="26" font-family="monospace" font-size="20" font-weight="bold" fill="#4F46E5">8866</text></svg>`;
-      return `data:image/svg+xml;base64,${btoa(svg)}`;
-    }
-
     try {
-      const res = await http.request<ArrayBuffer>({
+      const res = await http.request<any>({
         url: 'verifycode.servlet',
         method: 'GET',
         responseType: 'arraybuffer',
         params: { _t: Date.now() },
       });
 
-      let binary = '';
-      const bytes = new Uint8Array(res.data);
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
+      let base64 = '';
+      const rawData = res.data;
+
+      if (typeof rawData === 'string') {
+        const trimmed = rawData.trim();
+        if (trimmed.startsWith('data:image')) {
+          base64 = trimmed;
+        } else {
+          base64 = `data:image/jpeg;base64,${trimmed}`;
+        }
+      } else if (rawData instanceof ArrayBuffer) {
+        let binary = '';
+        const bytes = new Uint8Array(rawData);
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        base64 = `data:image/jpeg;base64,${btoa(binary)}`;
+      } else if (rawData && typeof rawData === 'object' && rawData.data) {
+        const inner = String(rawData.data).trim();
+        base64 = inner.startsWith('data:image') ? inner : `data:image/jpeg;base64,${inner}`;
+      } else {
+        throw new Error('验证码二进制数据格式解析失败');
       }
-      return `data:image/jpeg;base64,${btoa(binary)}`;
+
+      return base64;
     } catch (e) {
       console.error('获取验证码失败:', e);
       throw e;
@@ -126,14 +140,15 @@ class ApiService {
         },
       });
 
-      const text = res.data;
+      const text = res.data || '';
       if (
         res.status === 302 ||
         text.includes('个人中心') ||
         text.includes('退出登录') ||
         text.includes('xsMainV') ||
         text.includes('framework/xsMain') ||
-        text.includes('jsxsd')
+        text.includes('jsxsd') ||
+        text.includes('欢迎您')
       ) {
         // 登录成功后，立即拉取学生信息
         let studentInfo: Partial<StudentInfo> = { account };
@@ -148,7 +163,15 @@ class ApiService {
       // 提取错误提示
       const fontMatch = text.match(/<font[^>]*color=["']?red["']?[^>]*>(.*?)<\/font>/i);
       const alertMatch = text.match(/alert\(['"](.*?)['"]\)/);
-      const msg = fontMatch ? fontMatch[1] : alertMatch ? alertMatch[1] : '账号、密码或验证码有误';
+      let msg = '账号、密码或验证码有误';
+
+      if (fontMatch) {
+        msg = fontMatch[1].replace(/<[^>]+>/g, '').trim();
+      } else if (alertMatch) {
+        msg = alertMatch[1].trim();
+      } else if (text.includes('验证码错误') || text.includes('验证码不正确')) {
+        msg = '验证码输入错误，请刷新重试';
+      }
 
       return { success: false, message: msg };
     } catch (e: any) {
@@ -163,7 +186,7 @@ class ApiService {
     if (this.isMockMode) return MOCK_USER;
 
     try {
-      // 方式 1: 请求 grxx/xsxx
+      // 方式 1: 请求 grxx/xsxx (最全学籍卡片)
       const res = await http.request<string>({
         url: 'grxx/xsxx',
         method: 'GET',
@@ -212,12 +235,7 @@ class ApiService {
         },
       });
 
-      const parsed = parseTimetableHtml(res.data);
-      if (parsed.courses.length === 0) {
-        // 如果特定学期无课，但在 HTML 里未报错，返回解析结果
-        return parsed;
-      }
-      return parsed;
+      return parseTimetableHtml(res.data);
     } catch (e) {
       console.warn('获取课表异常:', e);
       return { courses: [] };

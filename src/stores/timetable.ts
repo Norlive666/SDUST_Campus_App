@@ -99,6 +99,10 @@ export const useTimetableStore = defineStore('timetable', {
           userStore.setCurWeek(result.currentWeek);
           this.selectedWeek = result.currentWeek;
         }
+        // 如果课表中解析到了真实学生学籍信息，同步至 userStore
+        if (result.studentInfo) {
+          userStore.updateStudentInfo(result.studentInfo);
+        }
 
         // 分配课程卡片颜色
         this.courses = result.courses.map((c) => ({

@@ -135,12 +135,16 @@ function matchCode(chars: number[][][]): string {
 
 /**
  * 识别 Base64 或 Image 图片验证码
+ * 内置 3 秒超时退出保护，绝不阻塞界面交互
  */
 export async function recognizeVerifyCode(imgOrBase64: HTMLImageElement | string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let img: HTMLImageElement;
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve('');
+    }, 3000);
 
-    const process = () => {
+    const process = (img: HTMLImageElement) => {
+      clearTimeout(timeout);
       try {
         const canvas = document.createElement('canvas');
         canvas.width = WIDTH;
@@ -157,23 +161,29 @@ export async function recognizeVerifyCode(imgOrBase64: HTMLImageElement | string
         const code = matchCode(chars);
         resolve(code);
       } catch (err) {
-        console.warn('验证码自动识别出错:', err);
+        console.warn('验证码自动识别异常:', err);
         resolve('');
       }
     };
 
     if (typeof imgOrBase64 === 'string') {
-      img = new Image();
-      img.onload = process;
-      img.onerror = () => resolve('');
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => process(img);
+      img.onerror = () => {
+        clearTimeout(timeout);
+        resolve('');
+      };
       img.src = imgOrBase64;
     } else {
-      img = imgOrBase64;
-      if (img.complete) {
-        process();
+      if (imgOrBase64.complete) {
+        process(imgOrBase64);
       } else {
-        img.onload = process;
-        img.onerror = () => resolve('');
+        imgOrBase64.onload = () => process(imgOrBase64);
+        imgOrBase64.onerror = () => {
+          clearTimeout(timeout);
+          resolve('');
+        };
       }
     }
   });

@@ -48,7 +48,7 @@
             v-model="captcha"
             name="captcha"
             label="验证码"
-            placeholder="正在自动识别..."
+            :placeholder="recognizing ? '正在智能识别...' : (captcha ? '' : '请输入验证码')"
             maxlength="6"
             :rules="[{ required: true, message: '请填写验证码' }]"
           >
@@ -125,11 +125,14 @@ const password = ref('');
 const captcha = ref('');
 const captchaBase64 = ref('');
 const autoRecognized = ref(false);
+const recognizing = ref(false);
 const showPassword = ref(false);
 const loading = ref(false);
 
 const loadCaptcha = async () => {
+  recognizing.value = true;
   autoRecognized.value = false;
+  captcha.value = '';
   try {
     const b64 = await api.getCaptchaBase64();
     captchaBase64.value = b64;
@@ -140,7 +143,9 @@ const loadCaptcha = async () => {
       autoRecognized.value = true;
     }
   } catch (e: any) {
-    showToast('验证码刷新失败，请检查网络');
+    showToast('验证码加载失败，请点击图片重试');
+  } finally {
+    recognizing.value = false;
   }
 };
 

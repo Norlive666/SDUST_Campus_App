@@ -25,12 +25,15 @@ export const useUserStore = defineStore('user', {
         if (saved) {
           const parsed = JSON.parse(saved);
           Object.assign(this, parsed);
+          // 仅在处于已登录状态且显式为演示模式时才保持 mock，避免登录界面被锁定在 mock 模式
+          this.isMockMode = this.isLoggedIn ? Boolean(parsed.isMockMode) : false;
           api.isMockMode = this.isMockMode;
         } else {
-          // 根据当前日期动态初始化
           const current = calculateCurrentTermAndWeek();
           this.curTerm = current.term;
           this.curWeek = current.week;
+          this.isMockMode = false;
+          api.isMockMode = false;
         }
       } catch (_) {}
     },
@@ -94,7 +97,8 @@ export const useUserStore = defineStore('user', {
       return res;
     },
 
-    updateStudentInfo(info: Partial<StudentInfo>) {
+    updateStudentInfo(info?: Partial<StudentInfo>) {
+      if (!info) return;
       if (info.name) this.name = info.name;
       if (info.college) this.college = info.college;
       if (info.major) this.major = info.major;
@@ -108,6 +112,9 @@ export const useUserStore = defineStore('user', {
       this.name = '山科同学';
       this.college = '山东科技大学';
       this.major = '本科专业';
+      this.className = '';
+      this.isMockMode = false;
+      api.isMockMode = false;
       this.save();
       localStorage.removeItem('shst_timetable');
       localStorage.removeItem('shst_grades');
