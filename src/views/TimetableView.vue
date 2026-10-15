@@ -1,23 +1,5 @@
 <template>
   <div class="timetable-page">
-    <header class="top-nav">
-      <div>
-        <span class="eyebrow">山科小站 · {{ userStore.curTerm }}</span>
-        <h1>我的课表<span class="title-dot"></span></h1>
-      </div>
-      <button
-        class="icon-btn"
-        aria-label="同步课表"
-        :disabled="timetableStore.isLoading"
-        @click="onRefresh"
-      >
-        <van-icon
-          name="replay"
-          :class="{ 'spin-icon': timetableStore.isLoading }"
-        />
-      </button>
-    </header>
-
     <section class="week-toolbar" aria-label="教学周导航">
       <button
         class="icon-btn"
@@ -28,11 +10,11 @@
         <van-icon name="arrow-left" />
       </button>
       <button class="week-title-btn" @click="showWeekPicker = true">
-        <strong>第 {{ timetableStore.selectedWeek }} 周</strong
-        ><span
-          >{{ weekDateList[0].date }} — {{ weekDateList[6].date }}
-          <van-icon name="arrow-down"
-        /></span>
+        <strong>第 {{ timetableStore.selectedWeek }} 周</strong>
+        <span>
+          {{ weekDateList[0].date }} — {{ weekDateList[6].date }}
+          <van-icon name="arrow-down" />
+        </span>
       </button>
       <button
         class="icon-btn"
@@ -48,6 +30,17 @@
         @click="selectWeek(userStore.curWeek)"
       >
         本周
+      </button>
+      <button
+        class="icon-btn"
+        aria-label="同步课表"
+        :disabled="timetableStore.isLoading"
+        @click="onRefresh"
+      >
+        <van-icon
+          name="replay"
+          :class="{ 'spin-icon': timetableStore.isLoading }"
+        />
       </button>
     </section>
 
@@ -345,7 +338,7 @@ const refreshing = ref(false);
 const loadFailed = ref(false);
 const syncError = ref("");
 const needsLogin = ref(false);
-const viewMode = ref<"week" | "day">("week");
+const viewMode = ref<"week" | "day">("day");
 const showWeekend = ref(false);
 const selectedDay = ref((new Date().getDay() + 6) % 7);
 
@@ -516,50 +509,25 @@ onMounted(() => {
   font-weight: 600;
 }
 .timetable-page {
-  padding: 24px 16px calc(90px + env(safe-area-inset-bottom));
+  padding: 16px 16px calc(90px + env(safe-area-inset-bottom));
   min-height: 100dvh;
   box-sizing: border-box;
-}
-.top-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-.eyebrow {
-  color: #7c849a;
-  font-size: 11px;
-  letter-spacing: 0.7px;
-}
-h1 {
-  font-size: 28px;
-  letter-spacing: -1px;
-  margin: 7px 0 0;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-.title-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #8478ef;
 }
 button {
   font-family: inherit;
   cursor: pointer;
 }
 .icon-btn {
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
   flex-shrink: 0;
   border: 1px solid #e9eaf1;
-  border-radius: 14px;
+  border-radius: 12px;
   background: white;
   color: #41465e;
   display: grid;
   place-items: center;
-  font-size: 19px;
+  font-size: 18px;
 }
 button:disabled {
   opacity: 0.35;
@@ -572,8 +540,8 @@ button:focus-visible {
 .week-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 22px;
+  gap: 6px;
+  margin-bottom: 18px;
 }
 .week-title-btn {
   flex: 1;
