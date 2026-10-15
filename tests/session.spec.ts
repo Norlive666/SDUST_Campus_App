@@ -49,6 +49,7 @@ test.beforeEach(async ({ page }) => {
     route.fulfill({ status: 200, contentType: "text/html", body: loginHtml }),
   );
   await page.goto("/timetable");
+  await page.getByRole("button", { name: "周课表", exact: true }).click();
   await expect(page.getByText("缓存课程", { exact: true })).toBeVisible();
 });
 

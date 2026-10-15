@@ -1,117 +1,173 @@
 <template>
-  <div class="grade-page">
-    <header class="page-header">
-      <h2 class="title">成绩与绩点</h2>
-      <van-button
-        size="small"
-        round
-        icon="filter-o"
-        @click="showTermPicker = true"
-        class="term-filter-btn"
+  <main class="grade-page campus-page">
+    <PageHeader
+      eyebrow="学习记录"
+      title="成绩"
+      subtitle="每一份努力，都有迹可循"
+      ><button
+        class="icon-button"
+        aria-label="刷新成绩"
+        :disabled="loading"
+        @click="onRefresh"
       >
-        {{ selectedTermLabel }}
-      </van-button>
-    </header>
-
-    <div v-if="loadError" class="load-error" role="status">
-      <span>{{ loadError }}</span
-      ><router-link v-if="needsLogin" to="/login?reauth=1"
-        >重新验证</router-link
-      >
+        <van-loading v-if="loading" size="18" /><van-icon
+          v-else
+          name="replay"
+        /></button
+    ></PageHeader>
+    <div class="filter-bar">
+      <button class="term-button" @click="showTermPicker = true">
+        <van-icon aria-hidden="true" name="calendar-o" /><span>{{ selectedTermLabel }}</span
+        ><van-icon aria-hidden="true" name="arrow-down" /></button
+      ><span class="record-count">{{ filteredGrades.length }} 门课程</span>
     </div>
+    <SyncNotice
+      class="load-error"
+      :message="loadError"
+      :needs-login="needsLogin"
+    />
     <van-pull-refresh
       v-model="refreshing"
       @refresh="onRefresh"
       class="pull-refresh"
     >
-      <!-- 绩点概览卡片 -->
-      <div class="summary-card">
+      <section class="summary-card" aria-label="成绩概览">
+        <div class="summary-label">
+          <span><van-icon aria-hidden="true" name="bar-chart-o" /> 学习概览</span><span>GPA</span>
+        </div>
         <div class="summary-top">
           <div class="gpa-box">
-            <span class="gpa-label">平均学分绩点 (GPA)</span>
-            <span class="gpa-value">{{ calculatedGpa }}</span>
+            <span class="gpa-label">平均学分绩点</span
+            ><strong class="gpa-value">{{
+              loading && !grades.length ? "—" : calculatedGpa
+            }}</strong>
           </div>
           <div class="score-box">
-            <span class="score-label">加权均分</span>
-            <span class="score-value">{{ calculatedAvgScore }}</span>
+            <strong class="score-value">{{ calculatedAvgScore }}</strong
+            ><span class="score-label">加权平均分</span>
           </div>
         </div>
-
         <div class="summary-bottom">
           <div class="stat-item">
-            <span class="stat-num">{{ totalCredits }}</span>
-            <span class="stat-desc">总获得学分</span>
+            <strong>{{ totalCredits }}</strong
+            ><span>已获学分</span>
           </div>
-          <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-num">{{ filteredGrades.length }}</span>
-            <span class="stat-desc">修读门数</span>
+            <strong
+              >{{ passedCount
+              }}<small> / {{ filteredGrades.length }}</small></strong
+            ><span>通过课程</span>
           </div>
-          <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-num text-green">{{ passedCount }}</span>
-            <span class="stat-desc">通过门数</span>
+            <strong
+              :class="{ attention: filteredGrades.length > passedCount }"
+              >{{ filteredGrades.length - passedCount }}</strong
+            ><span>待通过课程</span>
           </div>
         </div>
+      </section>
+      <div class="section-heading">
+        <h2>课程成绩</h2>
+        <span v-if="loading" class="state-loading"
+          ><van-loading size="11" /> 同步中</span
+        ><span v-else>共 {{ visibleGrades.length }} 条记录</span>
       </div>
-
-      <!-- 成绩列表 -->
-      <div class="grades-list" v-if="filteredGrades.length > 0">
-        <div
-          v-for="(g, idx) in filteredGrades"
-          :key="idx"
+      <label class="grade-search"
+        ><van-icon aria-hidden="true" name="search" /><input
+          v-model="query"
+          type="search"
+          aria-label="搜索课程"
+          placeholder="搜索课程名称" /><button
+          v-if="query"
+          type="button"
+          aria-label="清空搜索"
+          @click="query = ''"
+        >
+          <van-icon aria-hidden="true" name="cross" /></button
+      ></label>
+      <div class="grade-segments" aria-label="成绩筛选">
+        <button
+          v-for="item in statusOptions"
+          :key="item.value"
+          :aria-pressed="statusFilter === item.value"
+          :class="{ selected: statusFilter === item.value }"
+          @click="statusFilter = item.value"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+      <div v-if="visibleGrades.length" class="grades-list">
+        <article
+          v-for="(g, idx) in visibleGrades"
+          :key="g.code + g.term + idx"
           class="grade-item-card"
         >
           <div class="grade-card-left">
             <div class="course-name">{{ g.name }}</div>
             <div class="course-meta">
-              <van-tag type="primary" plain class="meta-tag">{{
-                g.type || "必修"
-              }}</van-tag>
-              <span class="meta-text">{{ g.credit }} 学分</span>
-              <span class="meta-text">绩点: {{ g.gpa }}</span>
+              <span class="meta-tag">{{ g.type || "必修" }}</span
+              ><span>{{ g.credit }} 学分</span><span>绩点 {{ g.gpa }}</span>
             </div>
-            <div class="course-term">{{ g.term }}</div>
+            <div class="course-term">
+              {{ g.term }}<span v-if="g.examType"> · {{ g.examType }}</span>
+            </div>
           </div>
-
           <div class="grade-card-right">
-            <div class="score-display" :class="{ 'score-fail': !g.isPass }">
-              {{ g.score }}
-            </div>
-            <div
+            <strong
+              class="score-display"
+              :class="{
+                'score-fail': !g.isPass,
+                'score-word': g.score.length > 3,
+              }"
+              >{{ g.score }}</strong
+            ><span
               class="score-status"
               :class="g.isPass ? 'status-pass' : 'status-fail'"
+              ><i></i>{{ g.isPass ? "已通过" : "未通过" }}</span
             >
-              {{ g.isPass ? "已通过" : "未通过" }}
-            </div>
           </div>
-        </div>
+        </article>
       </div>
-
-      <van-empty
-        v-else
-        :description="
-          loading
-            ? '正在查询成绩…'
-            : loadError
-              ? '成绩暂未同步，请稍后重试'
-              : '暂无成绩记录'
-        "
-        image="search"
-      />
+      <div v-else class="empty-state">
+        <span class="empty-icon"
+          ><van-icon aria-hidden="true" :name="loading ? 'search' : 'notes-o'"
+        /></span>
+        <h3>
+          {{
+            loading
+              ? "正在查询成绩"
+              : query || statusFilter !== "all"
+                ? "没有匹配的课程"
+                : loadError
+                  ? "成绩暂未同步"
+                  : "暂无成绩记录"
+          }}
+        </h3>
+        <p>
+          {{
+            query || statusFilter !== "all"
+              ? "试试其他课程名称或筛选条件"
+              : loadError
+                ? "已有缓存会继续保留，可以稍后重试"
+                : "已公布的课程成绩将在这里显示"
+          }}
+        </p>
+        <button v-if="loadError && !loading" @click="onRefresh">
+          重新查询
+        </button>
+      </div>
+      <p class="footnote">成绩以教务系统为准 · 下拉可同步最新记录</p>
     </van-pull-refresh>
-
-    <!-- 学期选择弹窗 -->
     <van-action-sheet
       v-model:show="showTermPicker"
+      title="选择成绩学期"
       :actions="termOptions"
       cancel-text="取消"
       close-on-click-action
       @select="onSelectTerm"
     />
-  </div>
+  </main>
 </template>
-
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { showToast } from "vant";
@@ -119,6 +175,8 @@ import { SessionExpiredError } from "../services/response";
 import { readGradeCache, saveGradeCache } from "../services/grade-cache";
 import { api } from "../services/api";
 import { GradeItem } from "../services/parser";
+import PageHeader from "../components/PageHeader.vue";
+import SyncNotice from "../components/SyncNotice.vue";
 import { useUserStore } from "../stores/user";
 
 const userStore = useUserStore();
@@ -131,6 +189,21 @@ const loadError = ref("");
 const loading = ref(false);
 const needsLogin = ref(false);
 let requestId = 0;
+const statusOptions = [
+  { label: "全部", value: "all" as const },
+  { label: "已通过", value: "pass" as const },
+  { label: "未通过", value: "fail" as const },
+];
+const query = ref("");
+const statusFilter = ref<"all" | "pass" | "fail">("all");
+const visibleGrades = computed(() =>
+  filteredGrades.value.filter(
+    (g) =>
+      g.name.toLowerCase().includes(query.value.trim().toLowerCase()) &&
+      (statusFilter.value === "all" ||
+        (statusFilter.value === "pass" ? g.isPass : !g.isPass)),
+  ),
+);
 
 const termOptions = computed(() => {
   const current = userStore.curTerm;
@@ -259,199 +332,263 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.load-error {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 16px;
-  padding: 12px;
-  border-radius: 12px;
-  background: #fff4e6;
-  color: #975b16;
-  font-size: 12px;
-  line-height: 1.6;
+.record-count {
+  font-size: 11px;
+  color: #949bad;
+  white-space: nowrap;
 }
-.load-error span {
-  flex: 1;
+.summary-card {
+  border: 1px solid #e1daf6;
+  background: linear-gradient(120deg, #ede8fc, #f3f0fc 85%);
+  padding: 20px;
+  border-radius: 22px;
+  position: relative;
+  overflow: hidden;
 }
-.load-error a {
-  flex-shrink: 0;
-  color: #6151c8;
-  font-weight: 600;
+.summary-card::after {
+  content: "";
+  position: absolute;
+  width: 150px;
+  height: 150px;
+  border: 1px solid #e3dcf5;
+  border-radius: 50%;
+  top: -70px;
+  right: -45px;
+  pointer-events: none;
 }
-.grade-page {
-  min-height: 100vh;
-  background-color: #f8fafc;
-  padding: 16px 16px 80px;
-  box-sizing: border-box;
-}
-
-.page-header {
+.summary-label {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
+  color: #a094c4;
+  font-size: 10px;
+  letter-spacing: 1px;
 }
-
-.title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1e293b;
-  margin: 0;
+.summary-label .van-icon {
+  margin-right: 4px;
+  font-size: 13px;
 }
-
-.term-filter-btn {
-  border-color: #cbd5e1;
-  color: #475569;
+.summary-label > span:last-child {
+  letter-spacing: 2px;
 }
-
-.summary-card {
-  background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
-  border-radius: 20px;
-  padding: 20px;
-  color: #ffffff;
-  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.25);
-  margin-bottom: 20px;
-}
-
 .summary-top {
   display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  gap: 20px;
+  margin-top: 25px;
+  padding-bottom: 21px;
 }
-
-.gpa-label,
-.score-label {
+.gpa-label {
+  font-size: 11px;
+  color: #8f81b0;
   display: block;
-  font-size: 12px;
-  opacity: 0.85;
-  margin-bottom: 4px;
+  margin-bottom: 7px;
 }
-
 .gpa-value {
-  font-size: 32px;
-  font-weight: 800;
-  line-height: 1;
+  font-size: 48px;
+  font-weight: 650;
+  line-height: 1.15;
+  color: #65529e;
+  letter-spacing: -2px;
+  font-variant-numeric: tabular-nums;
 }
-
-.score-value {
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.summary-bottom {
+.score-box {
   display: flex;
-  justify-content: space-around;
-  align-items: center;
-  padding-top: 14px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding-bottom: 4px;
 }
-
+.score-value {
+  font-size: 25px;
+  font-weight: 650;
+  color: #7b6a9e;
+}
+.score-label {
+  font-size: 10px;
+  color: #9c8eb4;
+}
+.summary-bottom {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding-top: 17px;
+  border-top: 1px solid #e1daf1;
+}
 .stat-item {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  gap: 6px;
+  padding-left: 17px;
+  border-left: 1px solid #e1daf1;
 }
-
-.stat-num {
-  font-size: 16px;
-  font-weight: 700;
+.stat-item:first-child {
+  padding-left: 0;
+  border: 0;
 }
-
-.stat-desc {
+.stat-item strong {
+  color: #706087;
+  font-size: 17px;
+  font-weight: 650;
+}
+.stat-item small {
+  font-weight: 400;
   font-size: 11px;
-  opacity: 0.8;
-  margin-top: 2px;
+  color: #a396b4;
 }
-
-.stat-divider {
-  width: 1px;
-  height: 24px;
-  background: rgba(255, 255, 255, 0.2);
+.stat-item > span {
+  font-size: 9px;
+  color: #a194b1;
 }
-
+.stat-item .attention {
+  color: #c38b64;
+}
+.grade-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #e6e8f0;
+  background: white;
+  border-radius: 12px;
+  padding: 0 12px;
+  height: 43px;
+  color: #a2a7b8;
+}
+.grade-search input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: none;
+  outline: 0;
+  font-size: 12px;
+  color: #656b80;
+}
+.grade-search input::placeholder {
+  color: #b0b4c3;
+}
+.grade-search button {
+  background: none;
+  border: 0;
+  color: #a2a7b8;
+  padding: 10px 0;
+}
+.grade-segments {
+  display: flex;
+  gap: 7px;
+  padding: 13px 0 17px;
+}
+.grade-segments button {
+  border: 1px solid transparent;
+  background: none;
+  color: #9298ac;
+  border-radius: 9px;
+  padding: 7px 13px;
+  min-height: 34px;
+  font-size: 11px;
+}
+.grade-segments .selected {
+  color: #8773be;
+  background: #eae5f8;
+  border-color: #e1d9f3;
+  font-weight: 600;
+}
 .grades-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 11px;
 }
-
 .grade-item-card {
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 16px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  justify-content: space-between;
+  gap: 15px;
+  padding: 17px 16px;
+  border-radius: 17px;
+  border: 1px solid #e9eaf2;
+  background: white;
 }
-
 .grade-card-left {
   flex: 1;
-  padding-right: 12px;
+  min-width: 0;
 }
-
 .course-name {
+  color: #464b62;
   font-size: 15px;
-  font-weight: 600;
-  color: #1e293b;
-  margin-bottom: 6px;
+  line-height: 1.55;
+  font-weight: 650;
+  overflow-wrap: anywhere;
 }
-
 .course-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 4px;
-}
-
-.meta-tag {
-  font-size: 10px;
-}
-
-.meta-text {
-  font-size: 12px;
-  color: #64748b;
-}
-
-.course-term {
   font-size: 11px;
-  color: #94a3b8;
+  color: #7d8498;
+  margin-top: 9px;
 }
-
+.meta-tag {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: #f4f1fa;
+  color: #a394b9;
+  font-size: 9px;
+}
+.course-term {
+  font-size: 10px;
+  color: #8990a4;
+  margin-top: 9px;
+}
 .grade-card-right {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  min-width: 60px;
+  gap: 8px;
+  flex-shrink: 0;
+  max-width: 90px;
 }
-
 .score-display {
-  font-size: 22px;
-  font-weight: 800;
-  color: #4f46e5;
-  line-height: 1.2;
+  font-size: 27px;
+  line-height: 1.1;
+  font-weight: 650;
+  letter-spacing: -0.8px;
+  color: #8976bb;
 }
-
+.score-word {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
 .score-fail {
-  color: #ef4444;
+  color: #cc8588;
 }
-
 .score-status {
-  font-size: 11px;
-  margin-top: 2px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 10px;
 }
-
+.score-status i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
 .status-pass {
-  color: #10b981;
+  color: #6a8976;
 }
-
 .status-fail {
-  color: #ef4444;
+  color: #cc8588;
 }
-
-.text-green {
-  color: #a7f3d0;
+@media (min-width: 700px) {
+  .grades-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .summary-card {
+    padding: 25px 30px;
+  }
+  .gpa-value {
+    font-size: 58px;
+  }
 }
 </style>

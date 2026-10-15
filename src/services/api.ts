@@ -18,13 +18,6 @@ import {
   StudentInfo,
   TimetableParseResult,
 } from "./parser";
-import {
-  MOCK_USER,
-  MOCK_COURSES,
-  MOCK_GRADES,
-  MOCK_EXAMS,
-  MOCK_CLASSROOMS,
-} from "./mock";
 
 export interface PreLoginInfo {
   scode: string;
@@ -39,7 +32,6 @@ export interface LoginResult {
 
 class ApiService {
   private lastPreInfo: PreLoginInfo | null = null;
-  public isMockMode = false;
   private renewal: Promise<void> | null = null;
   private sessionVersion = 0;
   private authGeneration = 0;
@@ -60,8 +52,7 @@ class ApiService {
         account =
           JSON.parse(localStorage.getItem("shst_user") || "{}").account || "";
       } catch (_) {}
-      if (!saved || saved.account !== account || this.isMockMode)
-        throw new SessionExpiredError();
+      if (!saved || saved.account !== account) throw new SessionExpiredError();
       for (let attempt = 0; attempt < 3; attempt++) {
         if (version !== this.sessionVersion) throw new SessionExpiredError();
         this.lastPreInfo = null;
@@ -125,11 +116,6 @@ class ApiService {
    * 1. 抓取登录前置参数 (scode & sxh)
    */
   async getPreLoginInfo(): Promise<PreLoginInfo> {
-    if (this.isMockMode) {
-      this.lastPreInfo = { scode: "mock_code", sxh: "123456789" };
-      return this.lastPreInfo;
-    }
-
     try {
       const res = await http.request<string>({
         url: "",
@@ -209,10 +195,6 @@ class ApiService {
     code: string,
     loadStudent = true,
   ): Promise<LoginResult> {
-    if (this.isMockMode) {
-      return { success: true, studentInfo: MOCK_USER };
-    }
-
     if (!this.lastPreInfo) {
       await this.getPreLoginInfo();
     }
@@ -279,8 +261,6 @@ class ApiService {
    * 4. 获取学生个人信息 (学院、专业、姓名)
    */
   async getStudentInfo(): Promise<Partial<StudentInfo> | null> {
-    if (this.isMockMode) return MOCK_USER;
-
     try {
       // 方式 1: 请求 grxx/xsxx (最全学籍卡片)
       const res = await this.authenticatedRequest({
@@ -306,14 +286,6 @@ class ApiService {
    * 5. 获取课表
    */
   async getTimetable(term: string = ""): Promise<TimetableParseResult> {
-    if (this.isMockMode) {
-      return {
-        courses: MOCK_COURSES,
-        currentTerm: MOCK_USER.curTerm,
-        currentWeek: MOCK_USER.curWeek,
-      };
-    }
-
     try {
       const res = await this.authenticatedRequest({
         url: "xskb/xskb_list.do",
@@ -345,14 +317,13 @@ class ApiService {
    * 6. 获取成绩 (支持 POST / GET 双协议自适应兜底与全量学期分页)
    */
   async getGrades(term: string = ""): Promise<GradeItem[]> {
-    if (this.isMockMode) {
-      return MOCK_GRADES;
-    }
-
     const kksj = term === "all" ? "" : term;
     try {
       // 预请求 cjcx_query（部分教务端用于初始化会话环境，若异常则平滑忽略）
-      await this.authenticatedRequest({ url: "kscj/cjcx_query", method: "GET" });
+      await this.authenticatedRequest({
+        url: "kscj/cjcx_query",
+        method: "GET",
+      });
     } catch (_) {}
 
     const payload = {
@@ -401,10 +372,6 @@ class ApiService {
    * 7. 获取考试日程 (支持 POST / GET 双协议自适应兜底)
    */
   async getExams(term: string = ""): Promise<ExamItem[]> {
-    if (this.isMockMode) {
-      return MOCK_EXAMS;
-    }
-
     const xnxqid = term === "all" ? "" : term;
     const payload = {
       xnxqid: xnxqid || "",
@@ -445,13 +412,6 @@ class ApiService {
       console.warn("获取考试异常:", e);
       throw e;
     }
-  }
-
-  /**
-   * 8. 空教室查询
-   */
-  async getClassrooms(): Promise<typeof MOCK_CLASSROOMS> {
-    return MOCK_CLASSROOMS;
   }
 }
 

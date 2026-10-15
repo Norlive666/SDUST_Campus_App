@@ -5,7 +5,7 @@ import TimetableView from "../views/TimetableView.vue";
 import GradeView from "../views/GradeView.vue";
 import ExamView from "../views/ExamView.vue";
 import ProfileView from "../views/ProfileView.vue";
-import ClassroomView from "../views/ClassroomView.vue";
+import { readPersistedUser } from "../services/session-state";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -40,11 +40,7 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
-  {
-    path: "/classroom",
-    name: "Classroom",
-    component: ClassroomView,
-  },
+  { path: "/:pathMatch(.*)*", redirect: "/timetable" },
 ];
 
 const router = createRouter({
@@ -53,13 +49,7 @@ const router = createRouter({
 });
 
 router.beforeEach((to, _, next) => {
-  let user: any = null;
-  try {
-    const saved = localStorage.getItem("shst_user");
-    if (saved) {
-      user = JSON.parse(saved);
-    }
-  } catch (_) {}
+  const user = readPersistedUser();
 
   const isLoggedIn = user && user.isLoggedIn;
   if (to.path !== "/login" && !isLoggedIn) {

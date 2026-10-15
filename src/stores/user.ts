@@ -3,7 +3,7 @@ import { useTimetableStore } from "./timetable";
 import { credentials } from "../services/credentials";
 import { http } from "../services/http";
 import { api } from "../services/api";
-import { MOCK_USER } from "../services/mock";
+import { readPersistedUser } from "../services/session-state";
 import { calculateCurrentTermAndWeek, StudentInfo } from "../services/parser";
 
 const initialTermAndWeek = calculateCurrentTermAndWeek();
@@ -18,29 +18,13 @@ export const useUserStore = defineStore("user", {
     className: "",
     curTerm: initialTermAndWeek.term, // 动态推算当前学期 如 2026-2027-1
     curWeek: initialTermAndWeek.week, // 动态推算当前第几周
-    isMockMode: false,
   }),
 
   actions: {
     init() {
-      try {
-        const saved = localStorage.getItem("shst_user");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          Object.assign(this, parsed);
-          // 仅在处于已登录状态且显式为演示模式时才保持 mock，避免登录界面被锁定在 mock 模式
-          this.isMockMode = this.isLoggedIn
-            ? Boolean(parsed.isMockMode)
-            : false;
-          api.isMockMode = this.isMockMode;
-        } else {
-          const current = calculateCurrentTermAndWeek();
-          this.curTerm = current.term;
-          this.curWeek = current.week;
-          this.isMockMode = false;
-          api.isMockMode = false;
-        }
-      } catch (_) {}
+      const saved = readPersistedUser();
+      if (saved) Object.assign(this, saved);
+      else this.$reset();
     },
 
     save() {
@@ -56,37 +40,12 @@ export const useUserStore = defineStore("user", {
             className: this.className,
             curTerm: this.curTerm,
             curWeek: this.curWeek,
-            isMockMode: this.isMockMode,
           }),
         );
       } catch (_) {}
     },
 
-    setMockMode(enable: boolean) {
-      api.invalidateSession();
-      this.isMockMode = enable;
-      api.isMockMode = enable;
-      if (enable) {
-        this.isLoggedIn = true;
-        this.account = MOCK_USER.account;
-        this.name = MOCK_USER.name;
-        this.college = MOCK_USER.college;
-        this.major = MOCK_USER.major;
-        this.className = MOCK_USER.className;
-        this.curTerm = MOCK_USER.curTerm;
-        this.curWeek = MOCK_USER.curWeek;
-        this.save();
-      }
-    },
-
-    async login(account: string, pass: string, code: string, asMock = false) {
-      if (asMock) {
-        this.setMockMode(true);
-        return { success: true, rememberFailed: false };
-      }
-
-      this.isMockMode = false;
-      api.isMockMode = false;
+    async login(account: string, pass: string, code: string) {
       api.invalidateSession();
       const previousAccount = this.account;
       const res = await api.login(account, pass, code);
@@ -139,8 +98,6 @@ export const useUserStore = defineStore("user", {
       this.college = "山东科技大学";
       this.major = "本科专业";
       this.className = "";
-      this.isMockMode = false;
-      api.isMockMode = false;
       this.save();
       localStorage.removeItem("shst_timetable");
       localStorage.removeItem("shst_grades");

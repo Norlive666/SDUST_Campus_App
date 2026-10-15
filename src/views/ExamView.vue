@@ -1,137 +1,212 @@
 <template>
-  <div class="exam-page">
-    <header class="page-header">
-      <h2 class="title">考试日程</h2>
-      <div class="header-actions">
-        <van-button
-          size="small"
-          round
-          icon="filter-o"
-          @click="showTermPicker = true"
-          class="term-filter-btn"
-        >
-          {{ selectedTermLabel }}
-        </van-button>
-        <van-button
-          size="small"
-          round
-          icon="replay"
-          :loading="loading"
-          @click="onRefresh"
-          class="refresh-btn"
-        >
-          刷新
-        </van-button>
-      </div>
-    </header>
-
-    <div v-if="loadError" class="load-error" role="status">
-      <span>{{ loadError }}</span>
-      <router-link v-if="needsLogin" to="/login?reauth=1">重新验证</router-link>
+  <main class="exam-page campus-page">
+    <PageHeader eyebrow="考试安排" title="考试" subtitle="提前准备，安心赴考"
+      ><button
+        class="icon-button"
+        aria-label="刷新考试"
+        :disabled="loading"
+        @click="onRefresh"
+      >
+        <van-loading v-if="loading" size="18" /><van-icon
+          v-else
+          name="replay"
+        /></button
+    ></PageHeader>
+    <div class="filter-bar">
+      <button class="term-button" @click="showTermPicker = true">
+        <van-icon aria-hidden="true" name="calendar-o" /><span>{{
+          selectedTermLabel
+        }}</span
+        ><van-icon aria-hidden="true" name="arrow-down" /></button
+      ><span class="exam-total">{{ upcomingExams.length }} 场待考</span>
     </div>
-
+    <SyncNotice
+      class="load-error"
+      :message="loadError"
+      :needs-login="needsLogin"
+    />
     <van-pull-refresh
       v-model="refreshing"
       @refresh="onRefresh"
       class="pull-refresh"
     >
-      <div v-if="nearestExam" class="nearest-banner">
-        <div class="banner-badge">最近一场</div>
-        <div class="banner-title">{{ nearestExam.name }}</div>
-        <div class="banner-info">
-          <span>{{ nearestExam.time }}</span>
-          <span>•</span>
-          <span>{{ nearestExam.location }}</span>
+      <section v-if="nearestExam" class="nearest-banner">
+        <div class="banner-top">
+          <span
+            ><van-icon aria-hidden="true" name="underway-o" /> 下一场考试</span
+          ><span class="banner-badge">{{
+            nearestExam.daysLeft === 0 ? "今天见" : "做好准备"
+          }}</span>
         </div>
-        <div class="banner-countdown" v-if="nearestExam.daysLeft !== undefined">
-          距离考试还有 <strong class="highlight-days">{{ nearestExam.daysLeft > 0 ? nearestExam.daysLeft : 0 }}</strong> 天
+        <div class="next-exam-main">
+          <div class="next-course">
+            <h2>{{ nearestExam.name }}</h2>
+            <p>{{ nearestExam.time || "考试时间待确认" }}</p>
+          </div>
+          <div class="exam-countdown">
+            <strong>{{ nearestExam.daysLeft }}</strong
+            ><span>{{
+              nearestExam.daysLeft === 0 ? "就是今天" : "天后开考"
+            }}</span>
+          </div>
         </div>
+        <div class="next-exam-place">
+          <span
+            ><van-icon aria-hidden="true" name="location-o" />
+            {{ nearestExam.location || "考场待确认" }}</span
+          ><span v-if="nearestExam.seat">座位 {{ nearestExam.seat }} 号</span>
+        </div>
+      </section>
+      <section
+        v-else-if="
+          !loading && !loadError && exams.length && !upcomingExams.length
+        "
+        class="all-done"
+      >
+        <span class="done-icon"
+          ><van-icon aria-hidden="true" name="passed"
+        /></span>
+        <div>
+          <h2>考试告一段落</h2>
+          <p>当前查询范围内暂无待考安排</p>
+        </div>
+      </section>
+      <div class="section-heading">
+        <h2>考试日程</h2>
+        <span v-if="loading" class="state-loading"
+          ><van-loading size="11" /> 同步中</span
+        ><span v-else>{{ visibleExams.length }} 场安排</span>
       </div>
-
-      <div class="exam-list" v-if="exams.length > 0">
-        <div v-for="(exam, idx) in exams" :key="idx" class="exam-card">
+      <div class="exam-segments" aria-label="考试筛选">
+        <button
+          v-for="item in examFilters"
+          :key="item.value"
+          :aria-pressed="examFilter === item.value"
+          :class="{ selected: examFilter === item.value }"
+          @click="examFilter = item.value"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+      <div v-if="visibleExams.length" class="exam-list">
+        <article
+          v-for="(exam, index) in visibleExams"
+          :key="exam.name + exam.time + index"
+          class="exam-card"
+          :class="{ past: exam.daysLeft !== undefined && exam.daysLeft < 0 }"
+        >
           <div class="exam-card-header">
-            <span class="exam-name">{{ exam.name }}</span>
-            <span v-if="exam.daysLeft !== undefined" class="countdown-tag" :class="{ 'tag-urgent': exam.daysLeft <= 3 }">
-              {{ exam.daysLeft > 0 ? `${exam.daysLeft} 天后` : '已结束/进行中' }}
-            </span>
+            <span class="exam-symbol"
+              ><van-icon aria-hidden="true" name="notes-o" /></span
+            ><span
+              class="exam-status"
+              :class="{
+                urgent:
+                  exam.daysLeft !== undefined &&
+                  exam.daysLeft >= 0 &&
+                  exam.daysLeft <= 3,
+              }"
+              >{{ statusText(exam) }}</span
+            >
           </div>
-
-          <div class="exam-details">
-            <div class="detail-row">
-              <van-icon name="clock-o" class="row-icon" />
-              <span class="row-label">时间：</span>
-              <span class="row-val">{{ exam.time }}</span>
+          <h3 class="exam-name">{{ exam.name }}</h3>
+          <div class="exam-time">
+            <van-icon aria-hidden="true" name="clock-o" /><span>{{
+              exam.time || "时间待确认"
+            }}</span>
+          </div>
+          <div class="exam-card-bottom">
+            <div class="exam-location">
+              <span>考试地点</span
+              ><strong>{{ exam.location || "考场待确认" }}</strong>
             </div>
-
-            <div class="detail-row">
-              <van-icon name="location-o" class="row-icon" />
-              <span class="row-label">考场：</span>
-              <span class="row-val font-semibold">{{ exam.location }}</span>
-            </div>
-
-            <div class="detail-row">
-              <van-icon name="idcard" class="row-icon" />
-              <span class="row-label">座位：</span>
-              <span class="row-val font-semibold seat-num">{{ exam.seat }} 号</span>
+            <div class="exam-seat">
+              <span>座位号</span
+              ><strong
+                >{{ exam.seat || "—"
+                }}<small v-if="exam.seat">号</small></strong
+              >
             </div>
           </div>
-        </div>
+        </article>
       </div>
-
-      <van-empty
-        v-else
-        :description="loading ? '正在查询考试安排…' : (loadError ? '考试暂未同步，请稍后重试' : '暂无考试安排')"
-        :image="loading ? 'search' : 'passed'"
-      />
+      <div v-else class="empty-state">
+        <span class="empty-icon"
+          ><van-icon
+            aria-hidden="true"
+            :name="loading ? 'search' : 'calendar-o'"
+        /></span>
+        <h3>
+          {{
+            loading
+              ? "正在查询考试"
+              : loadError
+                ? "考试暂未同步"
+                : "暂无考试安排"
+          }}
+        </h3>
+        <p>
+          {{
+            loadError
+              ? "请检查校园网连接，已有缓存会继续保留"
+              : examFilter !== "all"
+                ? "当前筛选范围内没有相关考试"
+                : "发布后的考试信息将在这里显示"
+          }}
+        </p>
+        <button v-if="loadError && !loading" @click="onRefresh">
+          重新查询
+        </button>
+      </div>
+      <p class="footnote">考试安排以教务系统最新通知为准</p>
     </van-pull-refresh>
-
-    <!-- 学期选择弹窗 -->
     <van-action-sheet
       v-model:show="showTermPicker"
+      title="选择考试学期"
       :actions="termOptions"
       cancel-text="取消"
       close-on-click-action
       @select="onSelectTerm"
     />
-  </div>
+  </main>
 </template>
-
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { showToast } from 'vant';
-import { SessionExpiredError } from '../services/response';
-import { readExamCache, saveExamCache } from '../services/exam-cache';
-import { api } from '../services/api';
-import { ExamItem } from '../services/parser';
-import { useUserStore } from '../stores/user';
+import { ref, computed, onMounted } from "vue";
+import { showToast } from "vant";
+import { SessionExpiredError } from "../services/response";
+import { readExamCache, saveExamCache } from "../services/exam-cache";
+import { api } from "../services/api";
+import { ExamItem } from "../services/parser";
+import PageHeader from "../components/PageHeader.vue";
+import SyncNotice from "../components/SyncNotice.vue";
+import { useUserStore } from "../stores/user";
 
 const userStore = useUserStore();
 const exams = ref<ExamItem[]>([]);
 const refreshing = ref(false);
 const loading = ref(false);
 const showTermPicker = ref(false);
-const selectedTerm = ref('');
-const loadError = ref('');
+const selectedTerm = ref("");
+const loadError = ref("");
 const needsLogin = ref(false);
 let requestId = 0;
 
 const termOptions = computed(() => {
-  const current = userStore.curTerm || '2026-2027-1';
-  const year = parseInt(current.split('-')[0], 10) || new Date().getFullYear();
+  const current = userStore.curTerm || "2026-2027-1";
+  const year = parseInt(current.split("-")[0], 10) || new Date().getFullYear();
   const terms = new Set([current]);
   for (let y = year; y >= year - 5; y--) {
     terms.add(`${y}-${y + 1}-1`);
     terms.add(`${y}-${y + 1}-2`);
   }
   return [
-    { name: '全部学期', value: 'all' },
+    { name: "全部学期", value: "all" },
     ...Array.from(terms)
       .filter(Boolean)
       .sort()
       .reverse()
       .map((value) => ({
-        name: value + (value === current ? ' (当前)' : ''),
+        name: value + (value === current ? " (当前)" : ""),
         value,
       })),
   ];
@@ -139,24 +214,49 @@ const termOptions = computed(() => {
 
 const selectedTermLabel = computed(() => {
   const found = termOptions.value.find((t) => t.value === selectedTerm.value);
-  return found ? found.name : '学期选择';
+  return found ? found.name : "学期选择";
 });
 
-const nearestExam = computed(() => {
-  if (exams.value.length === 0) return null;
-  const valid = exams.value.filter((e) => e.daysLeft !== undefined && e.daysLeft >= 0);
-  return valid.length > 0 ? valid[0] : exams.value[0];
-});
-
+const examFilter = ref<"all" | "upcoming" | "past">("all");
+const examFilters = [
+  { label: "全部安排", value: "all" as const },
+  { label: "待考", value: "upcoming" as const },
+  { label: "已结束", value: "past" as const },
+];
+const upcomingExams = computed(() =>
+  exams.value
+    .filter((e) => e.daysLeft === undefined || e.daysLeft >= 0)
+    .sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity)),
+);
+const nearestExam = computed(
+  () => upcomingExams.value.find((e) => e.daysLeft !== undefined) || null,
+);
+const visibleExams = computed(() =>
+  exams.value.filter(
+    (e) =>
+      examFilter.value === "all" ||
+      (examFilter.value === "upcoming"
+        ? e.daysLeft === undefined || e.daysLeft >= 0
+        : e.daysLeft !== undefined && e.daysLeft < 0),
+  ),
+);
+const statusText = (exam: ExamItem) =>
+  exam.daysLeft === undefined
+    ? "时间待确认"
+    : exam.daysLeft < 0
+      ? "已结束"
+      : exam.daysLeft === 0
+        ? "今日考试"
+        : `${exam.daysLeft} 天后`;
 const loadExams = async (): Promise<boolean> => {
   const id = ++requestId;
   const term = selectedTerm.value;
-  loadError.value = '';
+  loadError.value = "";
   needsLogin.value = false;
   loading.value = true;
 
   try {
-    const data = await api.getExams(term === 'all' ? '' : term);
+    const data = await api.getExams(term === "all" ? "" : term);
     saveExamCache(term, data);
     if (id !== requestId) return false;
     exams.value = data;
@@ -164,7 +264,8 @@ const loadExams = async (): Promise<boolean> => {
   } catch (error) {
     if (id === requestId) {
       needsLogin.value = error instanceof SessionExpiredError;
-      loadError.value = error instanceof Error ? error.message : '获取考试安排失败，已保留缓存';
+      loadError.value =
+        error instanceof Error ? error.message : "获取考试安排失败，已保留缓存";
       showToast(loadError.value);
     }
     return false;
@@ -182,7 +283,7 @@ const onSelectTerm = (action: { value: string }) => {
 const onRefresh = async () => {
   try {
     if (await loadExams()) {
-      showToast({ type: 'success', message: '考试安排已更新' });
+      showToast({ type: "success", message: "考试安排已更新" });
     }
   } finally {
     refreshing.value = false;
@@ -191,203 +292,265 @@ const onRefresh = async () => {
 
 onMounted(() => {
   userStore.init();
-  selectedTerm.value = userStore.curTerm || 'all';
+  selectedTerm.value = userStore.curTerm || "all";
   exams.value = readExamCache(selectedTerm.value);
   loadExams();
 });
 </script>
 
 <style scoped>
-.exam-page {
-  min-height: 100vh;
-  background-color: #f8fafc;
-  padding: 16px 16px 80px;
-  box-sizing: border-box;
+.exam-total {
+  color: #a59ab7;
+  font-size: 11px;
+  white-space: nowrap;
 }
-
-.page-header {
+.nearest-banner {
+  padding: 20px;
+  border: 1px solid #e6ddf0;
+  border-radius: 22px;
+  background: linear-gradient(120deg, #eee8f8, #f7f0f6);
+}
+.banner-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  color: #a293b7;
+}
+.banner-top .van-icon {
+  margin-right: 4px;
+  font-size: 13px;
+}
+.banner-badge {
+  border: 1px solid #e0d5ec;
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 9px;
+}
+.next-exam-main {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  gap: 18px;
+  margin: 23px 0;
 }
-
-.title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1e293b;
+.next-course {
+  flex: 1;
+  min-width: 0;
+}
+.next-course h2 {
+  font-size: 19px;
+  line-height: 1.6;
+  color: #726082;
+  margin: 0 0 9px;
+}
+.next-course p {
+  color: #897797;
+  font-size: 10px;
+  line-height: 1.7;
   margin: 0;
 }
-
-.header-actions {
+.exam-countdown {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-}
-
-.term-filter-btn {
-  border-color: #e2e8f0;
-  color: #334155;
-  font-weight: 600;
-  background-color: #ffffff;
-}
-
-.refresh-btn {
-  border-color: #cbd5e1;
-  color: #475569;
-}
-
-.load-error {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 16px;
-  padding: 12px;
-  border-radius: 12px;
-  background: #fff4e6;
-  color: #975b16;
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.load-error span {
-  flex: 1;
-}
-
-.load-error a {
-  flex-shrink: 0;
-  color: #6151c8;
-  font-weight: 600;
-}
-
-.pull-refresh {
-  min-height: calc(100vh - 120px);
-}
-
-.nearest-banner {
-  background: linear-gradient(135deg, #f59e0b 0%, #ea580c 100%);
-  border-radius: 20px;
-  padding: 18px;
-  color: #ffffff;
-  box-shadow: 0 10px 20px rgba(245, 158, 11, 0.25);
-  margin-bottom: 20px;
-  position: relative;
-  overflow: hidden;
-}
-
-.banner-badge {
-  display: inline-block;
-  background: rgba(255, 255, 255, 0.25);
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-
-.banner-title {
-  font-size: 17px;
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-
-.banner-info {
-  display: flex;
   gap: 6px;
-  font-size: 12px;
-  opacity: 0.9;
-  margin-bottom: 10px;
+  min-width: 65px;
+  flex-shrink: 0;
 }
-
-.banner-countdown {
-  font-size: 14px;
-  font-weight: 500;
-  background: rgba(0, 0, 0, 0.15);
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 8px;
+.exam-countdown strong {
+  font-size: 46px;
+  color: #9678b7;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -2px;
 }
-
-.highlight-days {
-  font-size: 20px;
-  font-weight: 800;
-  color: #fef08a;
+.exam-countdown span {
+  font-size: 9px;
+  color: #ac99bd;
 }
-
+.next-exam-place {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 15px;
+  padding-top: 14px;
+  border-top: 1px solid #e2d9ec;
+  font-size: 10px;
+  color: #897299;
+  line-height: 1.7;
+}
+.next-exam-place > span:last-child {
+  flex-shrink: 0;
+}
+.all-done {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 24px 20px;
+  background: #edf3f0;
+  border: 1px solid #dce7df;
+  border-radius: 21px;
+}
+.done-icon {
+  font-size: 29px;
+  color: #8ca997;
+}
+.all-done h2 {
+  margin: 0 0 8px;
+  color: #768e7c;
+  font-size: 16px;
+}
+.all-done p {
+  margin: 0;
+  color: #9cad9f;
+  font-size: 11px;
+}
+.exam-segments {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.exam-segments button {
+  padding: 8px 13px;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  font-size: 11px;
+  color: #999cb0;
+}
+.exam-segments .selected {
+  color: #8773be;
+  background: #eae5f8;
+  border-color: #e1d9f3;
+  font-weight: 600;
+}
 .exam-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
-
 .exam-card {
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  padding: 18px;
+  border: 1px solid #e9eaf2;
+  background: white;
+  border-radius: 19px;
 }
-
 .exam-card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #f1f5f9;
-  padding-bottom: 10px;
-  margin-bottom: 12px;
+  gap: 15px;
+  margin-bottom: 13px;
 }
-
+.exam-symbol {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: #ad9cc9;
+  background: #f2eef9;
+  font-size: 17px;
+}
+.exam-status {
+  padding: 5px 8px;
+  font-size: 10px;
+  border-radius: 7px;
+  color: #8a7a9f;
+  background: #f7f4fb;
+}
+.exam-status.urgent {
+  color: #bc8b70;
+  background: #fbf0e7;
+}
 .exam-name {
-  font-size: 15px;
-  font-weight: 700;
-  color: #1e293b;
+  margin: 0 0 11px;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #4e4c64;
 }
-
-.countdown-tag {
+.exam-time {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
   font-size: 12px;
-  color: #4f46e5;
-  background: #eef2ff;
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-weight: 600;
+  color: #7d8498;
+  line-height: 1.8;
 }
-
-.tag-urgent {
-  color: #ef4444;
-  background: #fee2e2;
+.exam-time .van-icon {
+  font-size: 14px;
+  margin-top: 3px;
 }
-
-.exam-details {
+.exam-card-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 15px;
+  padding-top: 15px;
+  margin-top: 17px;
+  border-top: 1px dashed #e9eaf1;
+}
+.exam-location,
+.exam-seat {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
-
-.detail-row {
-  display: flex;
-  align-items: center;
+.exam-location {
+  flex: 1;
+  min-width: 0;
+}
+.exam-location > span,
+.exam-seat > span {
+  font-size: 9px;
+  color: #b0b4c2;
+}
+.exam-location strong {
+  color: #747a90;
   font-size: 13px;
+  line-height: 1.6;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
-
-.row-icon {
-  font-size: 15px;
-  color: #6366f1;
-  margin-right: 8px;
+.exam-seat {
+  text-align: right;
+  flex-shrink: 0;
+  min-width: 45px;
 }
-
-.row-label {
-  color: #64748b;
-  width: 44px;
-}
-
-.row-val {
-  color: #334155;
-}
-
-.font-semibold {
+.exam-seat strong {
+  color: #a08ebf;
+  font-size: 20px;
   font-weight: 600;
 }
-
-.seat-num {
-  color: #e11d48;
+.exam-seat small {
+  font-size: 9px;
+  margin-left: 4px;
+  font-weight: 400;
+}
+.past .exam-symbol {
+  background: #f3f4f6;
+  color: #b6bac6;
+}
+.past .exam-name,
+.past .exam-seat strong {
+  color: #989dad;
+}
+@media (min-width: 700px) {
+  .exam-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .nearest-banner {
+    padding: 25px 30px;
+  }
+  .next-course h2 {
+    font-size: 23px;
+  }
+  .exam-countdown strong {
+    font-size: 58px;
+  }
 }
 </style>
