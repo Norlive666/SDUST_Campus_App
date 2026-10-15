@@ -17,6 +17,9 @@ importers:
       '@capacitor/core':
         specifier: ^6.1.2
         version: 6.2.2
+      '@capacitor/ios':
+        specifier: ^6.2.2
+        version: 6.2.2(@capacitor/core@6.2.2)
       '@capacitor/keyboard':
         specifier: ^6.0.2
         version: 6.0.4(@capacitor/core@6.2.2)
@@ -100,6 +103,11 @@ packages:
 
   '@capacitor/core@6.2.2':
     resolution: {integrity: sha512-qEI3DcwJEPzhW+hVGKH8m4jbujtkdUiGkpMLHmpR8epACU7wEsV6NF8pCHzpsMYjc80oK7Cmpcw+MIienv/YRw==}
+
+  '@capacitor/ios@6.2.2':
+    resolution: {integrity: sha512-dc9upo3L5wSUVJBJnd7oRGGsiwB2rMe7ZF2bti8hvDVCAZeYMzzw8iqxuUc6cvGBhH2/LsORMBO51/vEQhdmHg==}
+    peerDependencies:
+      '@capacitor/core': ^6.2.0
 
   '@capacitor/keyboard@6.0.4':
     resolution: {integrity: sha512-tNeyQGxIOTiSv3g+dTxJ/plVpGMnB4daJuCHz1E2Kelo+jOx+FKlyFY9L1Ow144SCzuXK48NXr8WoxXfXgQEKA==}
@@ -1172,6 +1180,10 @@ snapshots:
   '@capacitor/core@6.2.2':
     dependencies:
       tslib: 2.8.1
+
+  '@capacitor/ios@6.2.2(@capacitor/core@6.2.2)':
+    dependencies:
+      '@capacitor/core': 6.2.2
 
   '@capacitor/keyboard@6.0.4(@capacitor/core@6.2.2)':
     dependencies:
