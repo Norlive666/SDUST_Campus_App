@@ -345,11 +345,11 @@ const selectedDay = ref((new Date().getDay() + 6) % 7);
 const weekDayLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
 const timeSlots = [
-  { name: "1-2", start: "08:00", end: "09:35" },
-  { name: "3-4", start: "10:05", end: "11:40" },
-  { name: "5-6", start: "14:00", end: "15:35" },
-  { name: "7-8", start: "16:00", end: "17:35" },
-  { name: "9-10", start: "19:00", end: "20:35" },
+  { name: "1-2", start: "08:00", end: "09:50" },
+  { name: "3-4", start: "10:10", end: "12:00" },
+  { name: "5-6", start: "14:00", end: "15:50" },
+  { name: "7-8", start: "16:10", end: "18:00" },
+  { name: "9-10", start: "19:00", end: "20:50" },
 ];
 
 /**

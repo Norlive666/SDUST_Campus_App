@@ -1,6 +1,6 @@
 {
   "name": "sdust-campus-app",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "private": true,
   "description": "山东科技大学移动教务助手 (SDUST Campus App - Android)",
   "scripts": {

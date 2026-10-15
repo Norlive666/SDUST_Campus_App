@@ -263,7 +263,7 @@ test("profile keeps settings, has no removed entries and offers week 25", async 
   await page.getByRole("button", { name: /关于山科小站/ }).click();
   await expect(
     page.getByRole("dialog").filter({ has: page.locator(".about-content") }),
-  ).toContainText("v1.0.13");
+  ).toContainText("v1.0.14");
   await page.getByRole("button", { name: "知道了" }).click();
   await page.getByRole("button", { name: "退出当前账号", exact: true }).click();
   await page.getByRole("button", { name: "继续使用", exact: true }).click();
