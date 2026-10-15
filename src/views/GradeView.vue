@@ -160,7 +160,9 @@ const selectedTermLabel = computed(() => {
 
 const filteredGrades = computed(() => {
   if (selectedTerm.value === "all") return grades.value;
-  return grades.value.filter((g) => g.term === selectedTerm.value);
+  return grades.value.filter(
+    (g) => !g.term || g.term === selectedTerm.value || g.term === "当前学期",
+  );
 });
 
 const totalCredits = computed(() => {
@@ -206,9 +208,19 @@ const loadGrades = async (): Promise<boolean> => {
   loading.value = true;
   try {
     const data = await api.getGrades(term === "all" ? "" : term);
-    saveGradeCache(term, data);
+    // 归一化学期标识，防止由于教务未回传学期字段导致前端筛选为空
+    const normalizedData = data.map((item) => ({
+      ...item,
+      term:
+        item.term && item.term !== "当前学期"
+          ? item.term
+          : term === "all"
+            ? item.term || userStore.curTerm || "当前学期"
+            : term,
+    }));
+    saveGradeCache(term, normalizedData);
     if (id !== requestId) return false;
-    grades.value = data;
+    grades.value = normalizedData;
     return true;
   } catch (error) {
     if (id === requestId) {
@@ -240,7 +252,7 @@ const onRefresh = async () => {
 
 onMounted(() => {
   userStore.init();
-  grades.value = readGradeCache("all");
+  grades.value = readGradeCache(selectedTerm.value);
   // Render cached grades immediately, then update in the background.
   loadGrades();
 });

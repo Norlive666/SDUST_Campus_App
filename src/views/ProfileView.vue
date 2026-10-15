@@ -153,7 +153,7 @@
           <li>GPA / 加权均分实时动态换算</li>
           <li>自适应 Android 沉浸式状态栏与手势</li>
         </ul>
-        <p class="copyright">山科小站 v1.0.11 (Android) · 山科大开源贡献</p>
+        <p class="copyright">山科小站 v1.0.12 (Android) · 山科大开源贡献</p>
       </div>
     </van-dialog>
   </div>

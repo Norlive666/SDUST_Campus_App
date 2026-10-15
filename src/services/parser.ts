@@ -492,15 +492,96 @@ export function parseTimetableHtml(html: string): TimetableParseResult {
 }
 
 /**
- * 成绩 HTML 解析 (动态列探测，杜绝全 0 与空白)
+ * 解析 SDUST 成绩 JSON 数据结构
  */
-export function parseGradesHtml(html: string): GradeItem[] {
-  const grades: GradeItem[] = [];
-  if (!html) return grades;
+export function parseGradesJson(json: any): GradeItem[] {
+  const list = Array.isArray(json)
+    ? json
+    : Array.isArray(json?.data)
+    ? json.data
+    : Array.isArray(json?.items)
+    ? json.items
+    : Array.isArray(json?.rows)
+    ? json.rows
+    : [];
 
+  const grades: GradeItem[] = [];
+  for (const item of list) {
+    if (!item) continue;
+    const name = (item.kc_mc || item.kcmc || item.name || '').trim();
+    if (!name || name === '无' || name.includes('暂无成绩') || name.includes('暂无数据')) continue;
+
+    const rawScore = String(item.zcj ?? item.cj ?? item.score ?? '').trim();
+    const score = rawScore || '0';
+    let credit = parseFloat(item.xf ?? item.credit ?? '0') || 0;
+    let gpa = parseFloat(item.jd ?? item.gpa ?? '0') || 0;
+    const code = (item.kch || item.code || '').trim();
+    const type = (item.kcsx || item.kcxz || item.type || '必修').trim();
+    const examType = (item.ksxz || item.khfs || '考试').trim();
+    const term = (item.xnxq01id || item.kksj || item.xnxqid || item.term || '').trim();
+
+    const numScore = parseFloat(score);
+    // 自动绩点换算（山科大 5 分制）
+    if (gpa === 0 && !isNaN(numScore)) {
+      if (numScore >= 60) {
+        gpa = parseFloat(((numScore - 60) / 10 + 1).toFixed(1));
+      } else {
+        gpa = 0.0;
+      }
+    } else if (gpa === 0) {
+      if (score === '优') gpa = 4.5;
+      else if (score === '良') gpa = 3.5;
+      else if (score === '中') gpa = 2.5;
+      else if (score === '及格') gpa = 1.5;
+      else if (score === '不及格' || score === '不合格') gpa = 0.0;
+    }
+
+    let isPass = true;
+    if (!isNaN(numScore)) {
+      isPass = numScore >= 60;
+    } else if (score === '不及格' || score === '不合格') {
+      isPass = false;
+    }
+
+    grades.push({
+      term: term || '当前学期',
+      code,
+      name,
+      score,
+      credit: credit || 1.0,
+      gpa,
+      type,
+      examType,
+      isPass,
+    });
+  }
+  return grades;
+}
+
+/**
+ * 成绩解析 (自适应 JSON 接口与 HTML 表格双协议解析，杜绝全 0 与空白)
+ */
+export function parseGradesHtml(html: any): GradeItem[] {
+  if (!html) return [];
+
+  // 1. 优先尝试解析 JSON 数据结构
+  if (typeof html === 'object') {
+    return parseGradesJson(html);
+  }
+  const trimmed = typeof html === 'string' ? html.trim() : '';
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const json = JSON.parse(trimmed);
+      return parseGradesJson(json);
+    } catch (_) {
+      // 容错回退到 HTML 表格解析
+    }
+  }
+
+  const grades: GradeItem[] = [];
   try {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = parser.parseFromString(trimmed, 'text/html');
     const table = doc.querySelector('#dataList') || Array.from(doc.querySelectorAll('table')).reverse().find(t => /课程名/.test(t.textContent || '') && /(?:成绩|分数|总评)/.test(t.textContent || ''));
     if (!table) return grades;
 
@@ -633,15 +714,74 @@ export function parseGradesHtml(html: string): GradeItem[] {
 }
 
 /**
- * 考试安排 HTML 解析
+ * 解析 SDUST 考试日程 JSON 数据结构
  */
-export function parseExamsHtml(html: string): ExamItem[] {
-  const exams: ExamItem[] = [];
-  if (!html) return exams;
+export function parseExamsJson(json: any): ExamItem[] {
+  const list = Array.isArray(json)
+    ? json
+    : Array.isArray(json?.data)
+    ? json.data
+    : Array.isArray(json?.items)
+    ? json.items
+    : Array.isArray(json?.rows)
+    ? json.rows
+    : [];
 
+  const exams: ExamItem[] = [];
+  const now = new Date().getTime();
+
+  for (const item of list) {
+    if (!item) continue;
+    const name = (item.kskcmc || item.kcmc || item.name || '').trim();
+    if (!name || name === '无' || name.includes('暂无考试') || name.includes('暂无数据')) continue;
+
+    const rawLocation = item.js_mc || item.classroom || item.location || '';
+    const location = rawLocation ? cleanSdustClassroom(rawLocation) : '暂未公布';
+    const seat = String(item.zwh ?? item.seat ?? '-').trim() || '-';
+    const time = (item.kssj || item.time || '待排考').trim();
+
+    let daysLeft: number | undefined = undefined;
+    const dateMatch = time.match(/(\d{4}-\d{2}-\d{2})/);
+    if (dateMatch) {
+      const examDate = new Date(dateMatch[1]).getTime();
+      daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
+    }
+
+    exams.push({
+      name,
+      time,
+      location,
+      seat,
+      daysLeft,
+    });
+  }
+  return exams;
+}
+
+/**
+ * 考试安排解析 (自适应 JSON 接口与 HTML 表格双协议解析)
+ */
+export function parseExamsHtml(html: any): ExamItem[] {
+  if (!html) return [];
+
+  // 1. 优先尝试解析 JSON 数据结构
+  if (typeof html === 'object') {
+    return parseExamsJson(html);
+  }
+  const trimmed = typeof html === 'string' ? html.trim() : '';
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const json = JSON.parse(trimmed);
+      return parseExamsJson(json);
+    } catch (_) {
+      // 容错回退到 HTML 表格解析
+    }
+  }
+
+  const exams: ExamItem[] = [];
   try {
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
+    const doc = parser.parseFromString(trimmed, 'text/html');
     const table = doc.querySelector('#dataList') || doc.querySelector('table');
     if (!table) return exams;
 

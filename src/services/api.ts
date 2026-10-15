@@ -342,7 +342,7 @@ class ApiService {
   }
 
   /**
-   * 6. 获取成绩 (支持 POST / GET 双协议自适应兜底)
+   * 6. 获取成绩 (支持 POST / GET 双协议自适应兜底与全量学期分页)
    */
   async getGrades(term: string = ""): Promise<GradeItem[]> {
     if (this.isMockMode) {
@@ -350,27 +350,50 @@ class ApiService {
     }
 
     const kksj = term === "all" ? "" : term;
-    // Initialize the query page before submitting: the server may establish
-    // module-specific state here. Never substitute a different semester.
-    await this.authenticatedRequest({ url: "kscj/cjcx_query", method: "GET" });
-    const params = { kksj, kcmc: "", kcxz: "", xsfs: "all" };
+    try {
+      // 预请求 cjcx_query（部分教务端用于初始化会话环境，若异常则平滑忽略）
+      await this.authenticatedRequest({ url: "kscj/cjcx_query", method: "GET" });
+    } catch (_) {}
+
+    const payload = {
+      kksj,
+      pageNum: 1,
+      pageSize: 999,
+      xsfs: "all",
+      kcxz: "",
+      kcsx: "",
+      kcmc: "",
+      sfxsbcxq: 1,
+    };
+
     try {
       const res = await this.authenticatedRequest({
         url: "kscj/cjcx_list",
         method: "POST",
-        data: params,
+        data: payload,
       });
       requireDataPage(res.data, "grades");
       return parseGradesHtml(res.data);
     } catch (error) {
       if (error instanceof SessionExpiredError) throw error;
-      const fallback = await this.authenticatedRequest({
-        url: "kscj/cjcx_list",
-        method: "GET",
-        params,
-      });
-      requireDataPage(fallback.data, "grades");
-      return parseGradesHtml(fallback.data);
+      try {
+        const fallback = await this.authenticatedRequest({
+          url: "kscj/cjcx_list",
+          method: "GET",
+          params: payload,
+        });
+        requireDataPage(fallback.data, "grades");
+        return parseGradesHtml(fallback.data);
+      } catch (err2) {
+        if (err2 instanceof SessionExpiredError) throw err2;
+        const minimal = await this.authenticatedRequest({
+          url: "kscj/cjcx_list",
+          method: "POST",
+          data: { kksj, xsfs: "all", pageNum: 1, pageSize: 999 },
+        });
+        requireDataPage(minimal.data, "grades");
+        return parseGradesHtml(minimal.data);
+      }
     }
   }
 
@@ -382,15 +405,20 @@ class ApiService {
       return MOCK_EXAMS;
     }
 
+    const xnxqid = term === "all" ? "" : term;
+    const payload = {
+      xnxqid: xnxqid || "",
+      pageNum: 1,
+      pageSize: 999,
+      xqlb: "",
+    };
+
     try {
       // 策略 1: POST 请求 xsks/xsksap_list
       const res = await this.authenticatedRequest({
         url: "xsks/xsksap_list",
         method: "POST",
-        data: {
-          xnxqid: term || "",
-          xqlb: "",
-        },
+        data: payload,
       });
 
       let parsed = parseExamsHtml(res.data);
@@ -398,8 +426,9 @@ class ApiService {
 
       // 策略 2: GET 请求 xsks/xsksap_list
       const getRes = await this.authenticatedRequest({
-        url: `xsks/xsksap_list?xnxqid=${encodeURIComponent(term || "")}`,
+        url: "xsks/xsksap_list",
         method: "GET",
+        params: payload,
       });
       parsed = parseExamsHtml(getRes.data);
       if (parsed.length > 0) return parsed;
@@ -408,10 +437,11 @@ class ApiService {
       const altRes = await this.authenticatedRequest({
         url: "xsks/xsks_list",
         method: "POST",
-        data: { xnxqid: term || "" },
+        data: { xnxqid: xnxqid || "", pageNum: 1, pageSize: 999 },
       });
       return parseExamsHtml(altRes.data);
     } catch (e) {
+      if (e instanceof SessionExpiredError) throw e;
       console.warn("获取考试异常:", e);
       throw e;
     }
