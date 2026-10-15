@@ -1,18 +1,21 @@
-import { defineStore } from 'pinia';
-import { api } from '../services/api';
-import { MOCK_USER } from '../services/mock';
-import { calculateCurrentTermAndWeek, StudentInfo } from '../services/parser';
+import { defineStore } from "pinia";
+import { useTimetableStore } from "./timetable";
+import { credentials } from "../services/credentials";
+import { http } from "../services/http";
+import { api } from "../services/api";
+import { MOCK_USER } from "../services/mock";
+import { calculateCurrentTermAndWeek, StudentInfo } from "../services/parser";
 
 const initialTermAndWeek = calculateCurrentTermAndWeek();
 
-export const useUserStore = defineStore('user', {
+export const useUserStore = defineStore("user", {
   state: () => ({
     isLoggedIn: false,
-    account: '',
-    name: '山科同学',
-    college: '山东科技大学',
-    major: '本科专业',
-    className: '',
+    account: "",
+    name: "山科同学",
+    college: "山东科技大学",
+    major: "本科专业",
+    className: "",
     curTerm: initialTermAndWeek.term, // 动态推算当前学期 如 2026-2027-1
     curWeek: initialTermAndWeek.week, // 动态推算当前第几周
     isMockMode: false,
@@ -21,12 +24,14 @@ export const useUserStore = defineStore('user', {
   actions: {
     init() {
       try {
-        const saved = localStorage.getItem('shst_user');
+        const saved = localStorage.getItem("shst_user");
         if (saved) {
           const parsed = JSON.parse(saved);
           Object.assign(this, parsed);
           // 仅在处于已登录状态且显式为演示模式时才保持 mock，避免登录界面被锁定在 mock 模式
-          this.isMockMode = this.isLoggedIn ? Boolean(parsed.isMockMode) : false;
+          this.isMockMode = this.isLoggedIn
+            ? Boolean(parsed.isMockMode)
+            : false;
           api.isMockMode = this.isMockMode;
         } else {
           const current = calculateCurrentTermAndWeek();
@@ -41,7 +46,7 @@ export const useUserStore = defineStore('user', {
     save() {
       try {
         localStorage.setItem(
-          'shst_user',
+          "shst_user",
           JSON.stringify({
             isLoggedIn: this.isLoggedIn,
             account: this.account,
@@ -52,12 +57,13 @@ export const useUserStore = defineStore('user', {
             curTerm: this.curTerm,
             curWeek: this.curWeek,
             isMockMode: this.isMockMode,
-          })
+          }),
         );
       } catch (_) {}
     },
 
     setMockMode(enable: boolean) {
+      api.invalidateSession();
       this.isMockMode = enable;
       api.isMockMode = enable;
       if (enable) {
@@ -76,13 +82,30 @@ export const useUserStore = defineStore('user', {
     async login(account: string, pass: string, code: string, asMock = false) {
       if (asMock) {
         this.setMockMode(true);
-        return { success: true };
+        return { success: true, rememberFailed: false };
       }
 
       this.isMockMode = false;
       api.isMockMode = false;
+      api.invalidateSession();
+      const previousAccount = this.account;
       const res = await api.login(account, pass, code);
+      let rememberFailed = false;
       if (res.success) {
+        try {
+          await credentials.save({ account, password: pass });
+        } catch (_) {
+          rememberFailed = true;
+          try {
+            await credentials.clear();
+          } catch (_) {}
+        }
+        if (previousAccount !== account) {
+          useTimetableStore().courses = [];
+          localStorage.removeItem("shst_timetable");
+          localStorage.removeItem("shst_grades");
+          localStorage.removeItem("shst_exams");
+        }
         this.isLoggedIn = true;
         this.account = account;
 
@@ -90,11 +113,12 @@ export const useUserStore = defineStore('user', {
           if (res.studentInfo.name) this.name = res.studentInfo.name;
           if (res.studentInfo.college) this.college = res.studentInfo.college;
           if (res.studentInfo.major) this.major = res.studentInfo.major;
-          if (res.studentInfo.className) this.className = res.studentInfo.className;
+          if (res.studentInfo.className)
+            this.className = res.studentInfo.className;
         }
         this.save();
       }
-      return res;
+      return { ...res, rememberFailed };
     },
 
     updateStudentInfo(info?: Partial<StudentInfo>) {
@@ -106,20 +130,22 @@ export const useUserStore = defineStore('user', {
       this.save();
     },
 
-    logout() {
+    async logout() {
+      api.invalidateSession();
+      useTimetableStore().courses = [];
       this.isLoggedIn = false;
-      this.account = '';
-      this.name = '山科同学';
-      this.college = '山东科技大学';
-      this.major = '本科专业';
-      this.className = '';
+      this.account = "";
+      this.name = "山科同学";
+      this.college = "山东科技大学";
+      this.major = "本科专业";
+      this.className = "";
       this.isMockMode = false;
       api.isMockMode = false;
       this.save();
-      localStorage.removeItem('shst_timetable');
-      localStorage.removeItem('shst_grades');
-      localStorage.removeItem('shst_exams');
-      localStorage.removeItem('sdust_cookie');
+      localStorage.removeItem("shst_timetable");
+      localStorage.removeItem("shst_grades");
+      localStorage.removeItem("shst_exams");
+      await Promise.all([credentials.clear(), http.clearCookie()]);
     },
 
     setCurWeek(week: number) {

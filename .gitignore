@@ -27,3 +27,7 @@ dist-ssr
 android/app/build
 android/.gradle
 android/local.properties
+
+# Browser regression artifacts
+test-results/
+playwright-report/

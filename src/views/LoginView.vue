@@ -48,7 +48,9 @@
             v-model="captcha"
             name="captcha"
             label="验证码"
-            :placeholder="recognizing ? '正在智能识别...' : (captcha ? '' : '请输入验证码')"
+            :placeholder="
+              recognizing ? '正在智能识别...' : captcha ? '' : '请输入验证码'
+            "
             maxlength="6"
             :rules="[{ required: true, message: '请填写验证码' }]"
           >
@@ -56,8 +58,17 @@
               <van-icon name="shield-o" class="field-icon" />
             </template>
             <template #button>
-              <div class="captcha-img-box" @click="loadCaptcha" title="点击刷新验证码">
-                <img v-if="captchaBase64" :src="captchaBase64" alt="验证码" class="captcha-img" />
+              <div
+                class="captcha-img-box"
+                @click="loadCaptcha"
+                title="点击刷新验证码"
+              >
+                <img
+                  v-if="captchaBase64"
+                  :src="captchaBase64"
+                  alt="验证码"
+                  class="captcha-img"
+                />
                 <span v-else class="captcha-loading">加载中</span>
               </div>
             </template>
@@ -108,22 +119,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { showToast, showNotify } from 'vant';
-import { api } from '../services/api';
-import { recognizeVerifyCode } from '../services/captcha';
-import { useUserStore } from '../stores/user';
-import { useTimetableStore } from '../stores/timetable';
+import { ref, onMounted } from "vue";
+import { useRouter } from "vue-router";
+import { showToast, showNotify } from "vant";
+import { api } from "../services/api";
+import { recognizeVerifyCode } from "../services/captcha";
+import { useUserStore } from "../stores/user";
+import { useTimetableStore } from "../stores/timetable";
 
 const router = useRouter();
 const userStore = useUserStore();
 const timetableStore = useTimetableStore();
 
-const account = ref('');
-const password = ref('');
-const captcha = ref('');
-const captchaBase64 = ref('');
+const account = ref("");
+const password = ref("");
+const captcha = ref("");
+const captchaBase64 = ref("");
 const autoRecognized = ref(false);
 const recognizing = ref(false);
 const showPassword = ref(false);
@@ -132,8 +143,9 @@ const loading = ref(false);
 const loadCaptcha = async () => {
   recognizing.value = true;
   autoRecognized.value = false;
-  captcha.value = '';
+  captcha.value = "";
   try {
+    await api.getPreLoginInfo();
     const b64 = await api.getCaptchaBase64();
     captchaBase64.value = b64;
     // 自动图像识别验证码
@@ -143,7 +155,7 @@ const loadCaptcha = async () => {
       autoRecognized.value = true;
     }
   } catch (e: any) {
-    showToast('验证码加载失败，请点击图片重试');
+    showToast("验证码加载失败，请点击图片重试");
   } finally {
     recognizing.value = false;
   }
@@ -152,18 +164,38 @@ const loadCaptcha = async () => {
 const onSubmit = async () => {
   loading.value = true;
   try {
-    const res = await userStore.login(account.value, password.value, captcha.value, false);
+    const res = await userStore.login(
+      account.value,
+      password.value,
+      captcha.value,
+      false,
+    );
     if (res.success) {
-      showToast({ type: 'success', message: `欢迎回来，${userStore.name}` });
+      showToast({ type: "success", message: `欢迎回来，${userStore.name}` });
       // 传入空字符串，教务系统自动拉取学生当前正在上课的学期
-      await timetableStore.fetchTimetable('');
-      router.replace('/timetable');
+      try {
+        await timetableStore.fetchTimetable("");
+      } catch (_) {
+        showToast("登录成功，课表暂未同步，可稍后刷新");
+      }
+      if (res.rememberFailed)
+        showNotify({
+          type: "warning",
+          message: "登录成功，但未能保存自动登录凭据，下次会话过期需重新验证",
+        });
+      router.replace("/timetable");
     } else {
-      showNotify({ type: 'warning', message: res.message || '登录失败，请重试' });
+      showNotify({
+        type: "warning",
+        message: res.message || "登录失败，请重试",
+      });
       loadCaptcha();
     }
   } catch (e: any) {
-    showNotify({ type: 'danger', message: '网络连接失败，请确认是否处于校园网' });
+    showNotify({
+      type: "danger",
+      message: "网络连接失败，请确认是否处于校园网",
+    });
     loadCaptcha();
   } finally {
     loading.value = false;
@@ -171,10 +203,10 @@ const onSubmit = async () => {
 };
 
 const onDemoLogin = async () => {
-  userStore.login('', '', '', true);
+  userStore.login("", "", "", true);
   await timetableStore.fetchTimetable(userStore.curTerm);
-  showToast({ type: 'success', message: '已进入山科大演示模式' });
-  router.replace('/timetable');
+  showToast({ type: "success", message: "已进入山科大演示模式" });
+  router.replace("/timetable");
 };
 
 onMounted(() => {

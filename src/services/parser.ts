@@ -501,7 +501,7 @@ export function parseGradesHtml(html: string): GradeItem[] {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
-    const table = doc.querySelector('#dataList') || doc.querySelector('table');
+    const table = doc.querySelector('#dataList') || Array.from(doc.querySelectorAll('table')).reverse().find(t => /课程名/.test(t.textContent || '') && /(?:成绩|分数|总评)/.test(t.textContent || ''));
     if (!table) return grades;
 
     const rows = Array.from(table.querySelectorAll('tr'));

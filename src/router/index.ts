@@ -1,48 +1,48 @@
-import { createRouter, createWebHistory, RouteRecordRaw } from 'vue-router';
-import LoginView from '../views/LoginView.vue';
-import MainLayout from '../views/MainLayout.vue';
-import TimetableView from '../views/TimetableView.vue';
-import GradeView from '../views/GradeView.vue';
-import ExamView from '../views/ExamView.vue';
-import ProfileView from '../views/ProfileView.vue';
-import ClassroomView from '../views/ClassroomView.vue';
+import { createRouter, createWebHistory, RouteRecordRaw } from "vue-router";
+import LoginView from "../views/LoginView.vue";
+import MainLayout from "../views/MainLayout.vue";
+import TimetableView from "../views/TimetableView.vue";
+import GradeView from "../views/GradeView.vue";
+import ExamView from "../views/ExamView.vue";
+import ProfileView from "../views/ProfileView.vue";
+import ClassroomView from "../views/ClassroomView.vue";
 
 const routes: RouteRecordRaw[] = [
   {
-    path: '/login',
-    name: 'Login',
+    path: "/login",
+    name: "Login",
     component: LoginView,
   },
   {
-    path: '/',
+    path: "/",
     component: MainLayout,
-    redirect: '/timetable',
+    redirect: "/timetable",
     children: [
       {
-        path: 'timetable',
-        name: 'Timetable',
+        path: "timetable",
+        name: "Timetable",
         component: TimetableView,
       },
       {
-        path: 'grade',
-        name: 'Grade',
+        path: "grade",
+        name: "Grade",
         component: GradeView,
       },
       {
-        path: 'exam',
-        name: 'Exam',
+        path: "exam",
+        name: "Exam",
         component: ExamView,
       },
       {
-        path: 'profile',
-        name: 'Profile',
+        path: "profile",
+        name: "Profile",
         component: ProfileView,
       },
     ],
   },
   {
-    path: '/classroom',
-    name: 'Classroom',
+    path: "/classroom",
+    name: "Classroom",
     component: ClassroomView,
   },
 ];
@@ -55,17 +55,17 @@ const router = createRouter({
 router.beforeEach((to, _, next) => {
   let user: any = null;
   try {
-    const saved = localStorage.getItem('shst_user');
+    const saved = localStorage.getItem("shst_user");
     if (saved) {
       user = JSON.parse(saved);
     }
   } catch (_) {}
 
   const isLoggedIn = user && user.isLoggedIn;
-  if (to.path !== '/login' && !isLoggedIn) {
-    next('/login');
-  } else if (to.path === '/login' && isLoggedIn) {
-    next('/timetable');
+  if (to.path !== "/login" && !isLoggedIn) {
+    next("/login");
+  } else if (to.path === "/login" && isLoggedIn && to.query.reauth !== "1") {
+    next("/timetable");
   } else {
     next();
   }

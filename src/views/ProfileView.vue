@@ -8,13 +8,19 @@
       <div class="user-meta">
         <div class="name-row">
           <span class="user-name">{{ userStore.name }}</span>
-          <van-tag v-if="userStore.isMockMode" type="warning" size="medium">演示模式</van-tag>
+          <van-tag v-if="userStore.isMockMode" type="warning" size="medium"
+            >演示模式</van-tag
+          >
           <van-tag v-else type="success" size="medium">已认证</van-tag>
         </div>
-        <div class="user-detail">{{ userStore.college }} · {{ userStore.major || '全日制学生' }}</div>
+        <div class="user-detail">
+          {{ userStore.college }} · {{ userStore.major || "全日制学生" }}
+        </div>
         <div class="user-id">
-          <span>学号: {{ userStore.account || '未登录' }}</span>
-          <span v-if="userStore.className" class="class-name">（{{ userStore.className }}）</span>
+          <span>学号: {{ userStore.account || "未登录" }}</span>
+          <span v-if="userStore.className" class="class-name"
+            >（{{ userStore.className }}）</span
+          >
         </div>
       </div>
     </div>
@@ -79,7 +85,14 @@
     </div>
 
     <div class="logout-box">
-      <van-button round block type="danger" plain @click="onLogout" class="logout-btn">
+      <van-button
+        round
+        block
+        type="danger"
+        plain
+        @click="onLogout"
+        class="logout-btn"
+      >
         退出当前登录
       </van-button>
     </div>
@@ -97,7 +110,13 @@
     <van-popup v-model:show="showWeekSheet" round position="bottom">
       <div class="picker-header">
         <span class="picker-title">设置当前教学周</span>
-        <van-button size="small" type="primary" round @click="showWeekSheet = false">确定</van-button>
+        <van-button
+          size="small"
+          type="primary"
+          round
+          @click="showWeekSheet = false"
+          >确定</van-button
+        >
       </div>
       <div class="week-grid">
         <div
@@ -113,10 +132,19 @@
     </van-popup>
 
     <!-- 关于弹窗 -->
-    <van-dialog v-model:show="showAboutDialog" title="关于山科小站 (Android)" confirm-button-text="了解">
+    <van-dialog
+      v-model:show="showAboutDialog"
+      title="关于山科小站 (Android)"
+      confirm-button-text="了解"
+    >
       <div class="about-content">
-        <p><strong>山科小站</strong> 是专为山东科技大学学生打造的移动教务助手。</p>
-        <p>本项目基于开源生态 <code>WindrunnerMax/SHST</code>，采用 Vue 3 + Vant + Capacitor 原生跨端技术重构为 Android 原生体验应用。</p>
+        <p>
+          <strong>山科小站</strong> 是专为山东科技大学学生打造的移动教务助手。
+        </p>
+        <p>
+          本项目基于开源生态 <code>WindrunnerMax/SHST</code>，采用 Vue 3 + Vant
+          + Capacitor 原生跨端技术重构为 Android 原生体验应用。
+        </p>
         <p><strong>特性：</strong></p>
         <ul>
           <li>内置图像字模二值化引擎，验证码全自动识别</li>
@@ -125,19 +153,19 @@
           <li>GPA / 加权均分实时动态换算</li>
           <li>自适应 Android 沉浸式状态栏与手势</li>
         </ul>
-        <p class="copyright">山科小站 v1.0.9 (Android) · 山科大开源贡献</p>
+        <p class="copyright">山科小站 v1.0.10 (Android) · 山科大开源贡献</p>
       </div>
     </van-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { showToast, showConfirmDialog } from 'vant';
-import { useUserStore } from '../stores/user';
-import { useTimetableStore } from '../stores/timetable';
-import { api } from '../services/api';
+import { ref } from "vue";
+import { useRouter } from "vue-router";
+import { showToast, showConfirmDialog } from "vant";
+import { useUserStore } from "../stores/user";
+import { useTimetableStore } from "../stores/timetable";
+import { api } from "../services/api";
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -148,25 +176,25 @@ const showWeekSheet = ref(false);
 const showAboutDialog = ref(false);
 
 const termOptions = [
-  { name: '2026-2027-1 (当前)', value: '2026-2027-1' },
-  { name: '2025-2026-2', value: '2025-2026-2' },
-  { name: '2025-2026-1', value: '2025-2026-1' },
-  { name: '2024-2025-2', value: '2024-2025-2' },
-  { name: '2024-2025-1', value: '2024-2025-1' },
+  { name: "2026-2027-1 (当前)", value: "2026-2027-1" },
+  { name: "2025-2026-2", value: "2025-2026-2" },
+  { name: "2025-2026-1", value: "2025-2026-1" },
+  { name: "2024-2025-2", value: "2024-2025-2" },
+  { name: "2024-2025-1", value: "2024-2025-1" },
 ];
 
 const onSyncStudentInfo = async () => {
-  showToast({ type: 'loading', message: '同步中...', forbidClick: true });
+  showToast({ type: "loading", message: "同步中...", forbidClick: true });
   try {
     const info = await api.getStudentInfo();
     if (info && (info.name || info.college)) {
       userStore.updateStudentInfo(info);
-      showToast({ type: 'success', message: '学籍信息已更新' });
+      showToast({ type: "success", message: "学籍信息已更新" });
     } else {
-      showToast('未检测到新学籍，保持现有信息');
+      showToast("未检测到新学籍，保持现有信息");
     }
   } catch (_) {
-    showToast('同步学籍失败');
+    showToast("同步学籍失败");
   }
 };
 
@@ -174,15 +202,15 @@ const toggleMock = (val: boolean) => {
   userStore.setMockMode(val);
   timetableStore.fetchTimetable(userStore.curTerm);
   showToast({
-    type: 'success',
-    message: val ? '已开启演示/离线模式' : '已关闭演示模式',
+    type: "success",
+    message: val ? "已开启演示/离线模式" : "已关闭演示模式",
   });
 };
 
 const onSelectTerm = (action: any) => {
   userStore.setCurTerm(action.value);
   timetableStore.fetchTimetable(action.value);
-  showToast('已切换至学期: ' + action.value);
+  showToast("已切换至学期: " + action.value);
 };
 
 const onSelectWeek = (w: number) => {
@@ -194,23 +222,27 @@ const onSelectWeek = (w: number) => {
 
 const onClearCache = () => {
   showConfirmDialog({
-    title: '清除缓存',
-    message: '确定要清除本地缓存的课表和成绩数据吗？下次进入将重新拉取。',
+    title: "清除缓存",
+    message: "确定要清除本地缓存的课表和成绩数据吗？下次进入将重新拉取。",
   }).then(() => {
-    localStorage.removeItem('shst_timetable');
-    localStorage.removeItem('shst_grades');
-    localStorage.removeItem('shst_exams');
-    showToast({ type: 'success', message: '本地缓存已清空' });
+    localStorage.removeItem("shst_timetable");
+    localStorage.removeItem("shst_grades");
+    localStorage.removeItem("shst_exams");
+    showToast({ type: "success", message: "本地缓存已清空" });
   });
 };
 
 const onLogout = () => {
   showConfirmDialog({
-    title: '退出登录',
-    message: '确定要退出当前账号吗？',
-  }).then(() => {
-    userStore.logout();
-    router.replace('/login');
+    title: "退出登录",
+    message: "确定要退出当前账号吗？",
+  }).then(async () => {
+    try {
+      await userStore.logout();
+    } catch (_) {
+      showToast("已退出，凭据清理未完成，请稍后重试");
+    }
+    router.replace("/login");
   });
 };
 </script>
