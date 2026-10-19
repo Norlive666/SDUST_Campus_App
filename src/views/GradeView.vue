@@ -103,27 +103,37 @@
           class="grade-item-card"
         >
           <div class="grade-card-left">
-            <div class="course-name">{{ g.name }}</div>
+            <div class="course-name">
+              {{ g.name }}
+              <span
+                v-if="g.examNature && !['正常考试', '初修'].includes(g.examNature)"
+                class="nature-tag"
+                :class="getNatureClass(g.examNature)"
+              >{{ g.examNature }}</span>
+            </div>
             <div class="course-meta">
               <span class="meta-tag">{{ g.type || "必修" }}</span
-              ><span>{{ g.credit }} 学分</span><span>绩点 {{ g.gpa }}</span>
+              ><span>{{ g.credit }} 学分</span
+              ><span v-if="g.score !== '缓考'">绩点 {{ g.gpa }}</span>
             </div>
             <div class="course-term">
               {{ g.term }}<span v-if="g.examType"> · {{ g.examType }}</span>
+              <span v-if="g.remark && g.remark !== g.examNature"> · {{ g.remark }}</span>
             </div>
           </div>
           <div class="grade-card-right">
             <strong
               class="score-display"
               :class="{
-                'score-fail': !g.isPass,
+                'score-fail': !g.isPass && g.score !== '缓考',
+                'score-pending': g.score === '缓考',
                 'score-word': g.score.length > 3,
               }"
               >{{ g.score }}</strong
             ><span
               class="score-status"
-              :class="g.isPass ? 'status-pass' : 'status-fail'"
-              ><i></i>{{ g.isPass ? "已通过" : "未通过" }}</span
+              :class="g.score === '缓考' ? 'status-pending' : g.isPass ? 'status-pass' : 'status-fail'"
+              ><i></i>{{ g.score === '缓考' ? "缓考待考" : g.isPass ? "已通过" : "未通过" }}</span
             >
           </div>
         </article>
@@ -193,17 +203,36 @@ const statusOptions = [
   { label: "全部", value: "all" as const },
   { label: "已通过", value: "pass" as const },
   { label: "未通过", value: "fail" as const },
+  { label: "补/缓考", value: "special" as const },
 ];
 const query = ref("");
-const statusFilter = ref<"all" | "pass" | "fail">("all");
+const statusFilter = ref<"all" | "pass" | "fail" | "special">("all");
 const visibleGrades = computed(() =>
-  filteredGrades.value.filter(
-    (g) =>
-      g.name.toLowerCase().includes(query.value.trim().toLowerCase()) &&
-      (statusFilter.value === "all" ||
-        (statusFilter.value === "pass" ? g.isPass : !g.isPass)),
-  ),
+  filteredGrades.value.filter((g) => {
+    const matchesQuery = g.name.toLowerCase().includes(query.value.trim().toLowerCase());
+    if (!matchesQuery) return false;
+
+    if (statusFilter.value === "all") return true;
+    if (statusFilter.value === "pass") return g.isPass && g.score !== "缓考";
+    if (statusFilter.value === "fail") return !g.isPass && g.score !== "缓考";
+    if (statusFilter.value === "special") {
+      return (
+        g.score === "缓考" ||
+        (g.examNature && (g.examNature.includes("缓考") || g.examNature.includes("补考") || g.examNature.includes("重修"))) ||
+        Boolean(g.makeupScore)
+      );
+    }
+    return true;
+  }),
 );
+
+const getNatureClass = (nature?: string) => {
+  if (!nature) return "";
+  if (nature.includes("缓考")) return "tag-deferred";
+  if (nature.includes("补考")) return "tag-makeup";
+  if (nature.includes("重修")) return "tag-retake";
+  return "tag-other";
+};
 
 const termOptions = computed(() => {
   const current = userStore.curTerm;
@@ -240,20 +269,33 @@ const filteredGrades = computed(() => {
 
 const totalCredits = computed(() => {
   const sum = filteredGrades.value.reduce(
-    (acc, cur) => acc + (cur.isPass ? cur.credit : 0),
+    (acc, cur) => {
+      if (cur.score === "缓考" || (cur.examNature?.includes("缓考") && isNaN(parseFloat(cur.score)))) {
+        return acc;
+      }
+      return acc + (cur.isPass ? cur.credit : 0);
+    },
     0,
   );
   return sum.toFixed(1);
 });
 
 const passedCount = computed(() => {
-  return filteredGrades.value.filter((g) => g.isPass).length;
+  return filteredGrades.value.filter((g) => {
+    if (g.score === "缓考" || (g.examNature?.includes("缓考") && isNaN(parseFloat(g.score)))) {
+      return false;
+    }
+    return g.isPass;
+  }).length;
 });
 
 const calculatedGpa = computed(() => {
   let totalPoints = 0;
   let totalCredit = 0;
   for (const g of filteredGrades.value) {
+    if (g.score === "缓考" || (g.examNature?.includes("缓考") && isNaN(parseFloat(g.score)))) {
+      continue;
+    }
     totalPoints += g.gpa * g.credit;
     totalCredit += g.credit;
   }
@@ -264,6 +306,9 @@ const calculatedAvgScore = computed(() => {
   let totalWeightedScore = 0;
   let totalCredit = 0;
   for (const g of filteredGrades.value) {
+    if (g.score === "缓考" || (g.examNature?.includes("缓考") && isNaN(parseFloat(g.score)))) {
+      continue;
+    }
     const scoreNum = parseFloat(g.score);
     if (!isNaN(scoreNum)) {
       totalWeightedScore += scoreNum * g.credit;
@@ -561,6 +606,9 @@ onMounted(() => {
 .score-fail {
   color: #cc8588;
 }
+.score-pending {
+  color: #d97706;
+}
 .score-status {
   display: flex;
   gap: 4px;
@@ -578,6 +626,38 @@ onMounted(() => {
 }
 .status-fail {
   color: #cc8588;
+}
+.status-pending {
+  color: #d97706;
+}
+.nature-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+.tag-deferred {
+  background: #fef3e2;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+.tag-makeup {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+.tag-retake {
+  background: #fdf2f8;
+  color: #db2777;
+  border: 1px solid #fbcfe8;
+}
+.tag-other {
+  background: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #e5e7eb;
 }
 @media (min-width: 700px) {
   .grades-list {

@@ -32,12 +32,15 @@ export interface GradeItem {
   term: string; // 学期 如 2026-2027-1
   code: string; // 课程编号
   name: string; // 课程名称
-  score: string; // 成绩 (如 88 或 优)
+  score: string; // 成绩 (如 88 或 优 或 缓考)
   credit: number; // 学分
   gpa: number; // 绩点
   type: string; // 课程属性 (必修/选修)
   examType: string; // 考核方式 (考试/考查)
   isPass: boolean; // 是否通过
+  examNature?: string; // 考试性质 (如 正常考试/补考/缓考/重修)
+  makeupScore?: string; // 补考/缓考成绩
+  remark?: string; // 成绩备注 (如 缓考/旷考/免修)
 }
 
 export interface ExamItem {
@@ -512,36 +515,46 @@ export function parseGradesJson(json: any): GradeItem[] {
     if (!name || name === '无' || name.includes('暂无成绩') || name.includes('暂无数据')) continue;
 
     const rawScore = String(item.zcj ?? item.cj ?? item.score ?? '').trim();
-    const score = rawScore || '0';
+    const makeupScore = String(item.bkcj ?? item.cx_cj ?? item.cxcj ?? '').trim();
+    const effectiveScore = String(item.zscj ?? item.yxcj ?? '').trim();
+    const remark = (item.cjbz || item.bz || item.tsyy || item.cjkc_bz || '').trim();
+    const examNature = (item.ksxz || item.cjxz || item.kslb || '').trim();
     let credit = parseFloat(item.xf ?? item.credit ?? '0') || 0;
     let gpa = parseFloat(item.jd ?? item.gpa ?? '0') || 0;
     const code = (item.kch || item.code || '').trim();
     const type = (item.kcsx || item.kcxz || item.type || '必修').trim();
-    const examType = (item.ksxz || item.khfs || '考试').trim();
+    const examType = (item.khfs || '考试').trim();
     const term = (item.xnxq01id || item.kksj || item.xnxqid || item.term || '').trim();
 
-    const numScore = parseFloat(score);
-    // 自动绩点换算（山科大 5 分制）
-    if (gpa === 0 && !isNaN(numScore)) {
-      if (numScore >= 60) {
-        gpa = parseFloat(((numScore - 60) / 10 + 1).toFixed(1));
-      } else {
-        gpa = 0.0;
-      }
-    } else if (gpa === 0) {
-      if (score === '优') gpa = 4.5;
-      else if (score === '良') gpa = 3.5;
-      else if (score === '中') gpa = 2.5;
-      else if (score === '及格') gpa = 1.5;
-      else if (score === '不及格' || score === '不合格') gpa = 0.0;
+    const isDeferred = examNature.includes('缓考') || remark.includes('缓考') || rawScore === '缓考';
+    const isMakeup = examNature.includes('补考') || remark.includes('补考') || (!!makeupScore && makeupScore !== '0');
+
+    let score = rawScore;
+    if (effectiveScore && !isNaN(parseFloat(effectiveScore))) {
+      score = effectiveScore;
+    } else if (makeupScore && !isNaN(parseFloat(makeupScore))) {
+      score = makeupScore;
+    } else if (isDeferred && (!score || score === '0' || score === '缓考')) {
+      score = '缓考';
+    } else if (!score) {
+      score = remark || '0';
     }
 
+    const numScore = parseFloat(score);
     let isPass = true;
-    if (!isNaN(numScore)) {
+    if (score === '缓考' || (isDeferred && isNaN(numScore))) {
+      isPass = true; // 缓考未出分，不计入挂科
+      gpa = 0.0;
+    } else if (!isNaN(numScore)) {
       isPass = numScore >= 60;
-    } else if (score === '不及格' || score === '不合格') {
-      isPass = false;
-    }
+      if (gpa === 0) {
+        gpa = numScore >= 60 ? parseFloat(((numScore - 60) / 10 + 1).toFixed(1)) : 0.0;
+      }
+    } else if (score === '优') { gpa = 4.5; isPass = true; }
+    else if (score === '良') { gpa = 3.5; isPass = true; }
+    else if (score === '中') { gpa = 2.5; isPass = true; }
+    else if (score === '及格') { gpa = 1.5; isPass = true; }
+    else if (score === '不及格' || score === '不合格') { gpa = 0.0; isPass = false; }
 
     grades.push({
       term: term || '当前学期',
@@ -553,6 +566,9 @@ export function parseGradesJson(json: any): GradeItem[] {
       type,
       examType,
       isPass,
+      examNature: examNature || (isDeferred ? '缓考' : isMakeup ? '补考' : undefined),
+      makeupScore: makeupScore || undefined,
+      remark: remark || undefined,
     });
   }
   return grades;
@@ -595,10 +611,14 @@ export function parseGradesHtml(html: any): GradeItem[] {
       code: -1,
       name: -1,
       score: -1,
+      makeupScore: -1,
+      effectiveScore: -1,
       credit: -1,
       gpa: -1,
       type: -1,
       examType: -1,
+      examNature: -1,
+      remark: -1,
     };
 
     for (let r = 0; r < Math.min(rows.length, 3); r++) {
@@ -607,10 +627,13 @@ export function parseGradesHtml(html: any): GradeItem[] {
       ths.forEach((th, idx) => {
         const text = th.textContent?.trim() || '';
         if (text.includes('学期')) { colMap.term = idx; foundHeader = true; }
-        else if (text.includes('课程编号') || text.includes('课程序号')) { colMap.code = idx; foundHeader = true; }
+        else if (text.includes('课程编号') || text.includes('课程序号') || text.includes('课程代码')) { colMap.code = idx; foundHeader = true; }
         else if (text.includes('课程名称') || text.includes('课程名')) { colMap.name = idx; foundHeader = true; }
+        else if (text.includes('补考') || text.includes('重修成绩')) { colMap.makeupScore = idx; foundHeader = true; }
+        else if (text.includes('有效成绩') || text.includes('最终成绩')) { colMap.effectiveScore = idx; foundHeader = true; }
+        else if (text.includes('考试性质') || text.includes('成绩性质') || text.includes('修读性质')) { colMap.examNature = idx; foundHeader = true; }
         else if (text.includes('成绩') || text.includes('分数') || text.includes('总评')) {
-          if (!text.includes('标识') && !text.includes('性质') && !text.includes('方式')) {
+          if (!text.includes('标识') && !text.includes('性质') && !text.includes('方式') && colMap.score === -1) {
             colMap.score = idx;
             foundHeader = true;
           }
@@ -625,6 +648,9 @@ export function parseGradesHtml(html: any): GradeItem[] {
           foundHeader = true;
         } else if (text.includes('方式')) {
           colMap.examType = idx;
+          foundHeader = true;
+        } else if (text.includes('备注') || text.includes('原因')) {
+          colMap.remark = idx;
           foundHeader = true;
         }
       });
@@ -652,13 +678,32 @@ export function parseGradesHtml(html: any): GradeItem[] {
       const term = getColText('term', 1);
       const code = getColText('code', 2);
       const name = getColText('name', 3);
-      const score = getColText('score', 4);
+      const rawScore = getColText('score', 4);
+      const makeupScore = getColText('makeupScore', -1);
+      const effectiveScore = getColText('effectiveScore', -1);
+      const examNature = getColText('examNature', -1);
+      const remark = getColText('remark', -1);
       let credit = parseFloat(getColText('credit', 6)) || 0;
       let gpa = parseFloat(getColText('gpa', 8)) || 0;
       const type = getColText('type', 10) || '必修';
       const examType = getColText('examType', 9) || '考试';
 
       if (!name || name.includes('课程名称') || name.includes('序号') || name === '无') continue;
+
+      const isDeferred = examNature.includes('缓考') || remark.includes('缓考') || rawScore.includes('缓考');
+      const isMakeup = examNature.includes('补考') || remark.includes('补考') || (makeupScore !== '' && makeupScore !== '0');
+
+      let score = rawScore;
+      if (effectiveScore && !isNaN(parseFloat(effectiveScore))) {
+        score = effectiveScore;
+      } else if (makeupScore && !isNaN(parseFloat(makeupScore))) {
+        score = makeupScore;
+      } else if (isDeferred && (!score || score === '0' || score === '缓考')) {
+        score = '缓考';
+      } else if (!score || score === '0') {
+        if (remark) score = remark;
+        else score = '0';
+      }
 
       // 如果未识别到学分，尝试在所有列中寻找合理的学分数值 (0.5 ~ 10.0)
       if (credit === 0) {
@@ -673,26 +718,20 @@ export function parseGradesHtml(html: any): GradeItem[] {
 
       // 自动绩点换算（如教务系统未返回独立绩点列，按山科大标准 5 分制推算）
       const numScore = parseFloat(score);
-      if (gpa === 0 && !isNaN(numScore)) {
-        if (numScore >= 60) {
-          gpa = parseFloat(((numScore - 60) / 10 + 1).toFixed(1));
-        } else {
-          gpa = 0.0;
-        }
-      } else if (gpa === 0) {
-        if (score === '优') gpa = 4.5;
-        else if (score === '良') gpa = 3.5;
-        else if (score === '中') gpa = 2.5;
-        else if (score === '及格') gpa = 1.5;
-        else if (score === '不及格') gpa = 0.0;
-      }
-
       let isPass = true;
-      if (!isNaN(numScore)) {
+      if (score === '缓考' || (isDeferred && isNaN(numScore))) {
+        isPass = true; // 缓考未出分，不计入挂科
+        gpa = 0.0;
+      } else if (!isNaN(numScore)) {
         isPass = numScore >= 60;
-      } else if (score === '不及格' || score === '不合格') {
-        isPass = false;
-      }
+        if (gpa === 0) {
+          gpa = numScore >= 60 ? parseFloat(((numScore - 60) / 10 + 1).toFixed(1)) : 0.0;
+        }
+      } else if (score === '优') { gpa = 4.5; isPass = true; }
+      else if (score === '良') { gpa = 3.5; isPass = true; }
+      else if (score === '中') { gpa = 2.5; isPass = true; }
+      else if (score === '及格') { gpa = 1.5; isPass = true; }
+      else if (score === '不及格' || score === '不合格') { gpa = 0.0; isPass = false; }
 
       grades.push({
         term: term || '当前学期',
@@ -704,6 +743,9 @@ export function parseGradesHtml(html: any): GradeItem[] {
         type,
         examType,
         isPass,
+        examNature: examNature || (isDeferred ? '缓考' : isMakeup ? '补考' : undefined),
+        makeupScore: makeupScore || undefined,
+        remark: remark || undefined,
       });
     }
   } catch (e) {
