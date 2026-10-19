@@ -1,6 +1,6 @@
 import { App } from "@capacitor/app";
 import { Browser } from "@capacitor/browser";
-import { Capacitor, CapacitorHttp } from "@capacitor/core";
+import { Capacitor, CapacitorHttp, registerPlugin } from "@capacitor/core";
 import { version } from "../../package.json";
 
 export const RELEASES_URL = "https://github.com/Norlive666/SDUST_Campus_App/releases";
@@ -100,9 +100,45 @@ export async function checkForUpdate(): Promise<AppUpdate | null> {
   return parseRelease(data, current);
 }
 
-export async function openUpdateUrl(url: string): Promise<void> {
-  const safeUrl = githubUrl(url);
+export const DOMESTIC_MIRRORS = [
+  { name: "极速镜像 (ghfast)", prefix: "https://ghfast.top/" },
+  { name: "备用镜像 (gh-proxy)", prefix: "https://gh-proxy.com/" },
+];
+export const DEFAULT_MIRROR = DOMESTIC_MIRRORS[0].prefix;
+
+export function toMirrorUrl(url: string, mirrorPrefix = DEFAULT_MIRROR): string {
+  if (!url) return "";
+  if (url.startsWith("https://github.com/")) {
+    return `${mirrorPrefix}${url}`;
+  }
+  return url;
+}
+
+export function isAllowedUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    const allowedHosts = ["github.com", "ghfast.top", "gh-proxy.com", "mirror.ghproxy.com"];
+    return allowedHosts.includes(url.hostname) ? url.href : null;
+  } catch (_) { return null; }
+}
+
+export async function openUpdateUrl(url: string, preferMirror?: boolean): Promise<void> {
+  const shouldUseMirror = preferMirror ?? Capacitor.isNativePlatform();
+  const targetUrl = shouldUseMirror && url.startsWith("https://github.com/") ? toMirrorUrl(url) : url;
+  const safeUrl = isAllowedUrl(targetUrl) || githubUrl(targetUrl);
   if (!safeUrl) throw new Error("下载链接不可用");
-  if (Capacitor.isNativePlatform()) await Browser.open({ url: safeUrl });
-  else window.open(safeUrl, "_blank", "noopener,noreferrer");
+
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const vault = registerPlugin<any>("CredentialVault");
+      await vault.openUrl({ url: safeUrl });
+      return;
+    } catch (_) {
+      await Browser.open({ url: safeUrl });
+      return;
+    }
+  }
+  window.open(safeUrl, "_blank", "noopener,noreferrer");
 }

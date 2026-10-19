@@ -1,6 +1,8 @@
 package com.sdust.shst;
 
 import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Build;
 import android.content.SharedPreferences;
 import android.security.keystore.KeyGenParameterSpec;
@@ -77,5 +79,22 @@ public class CredentialVaultPlugin extends Plugin {
     public void clear(PluginCall call) {
         if (prefs().edit().clear().commit()) call.resolve();
         else call.reject("Unable to clear credentials");
+    }
+    @PluginMethod
+    public void openUrl(PluginCall call) {
+        String urlString = call.getString("url");
+        if (urlString == null || urlString.isEmpty()) {
+            call.reject("Missing url");
+            return;
+        }
+        try {
+            Uri uri = Uri.parse(urlString);
+            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Unable to open url: " + e.getMessage());
+        }
     }
 }
