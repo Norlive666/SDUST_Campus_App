@@ -83,131 +83,140 @@
     </div>
     <van-pull-refresh v-model="refreshing" @refresh="onRefresh">
       <div
-        v-if="timetableStore.isLoading && !timetableStore.courses.length"
-        class="loading-state"
+        class="schedule-swipe"
+        @touchstart.passive="onSwipeStart"
+        @touchmove="onSwipeMove"
+        @touchend="onSwipeEnd"
+        @touchcancel="cancelSwipe"
+        @click.capture="onSwipeClick"
       >
-        <van-loading color="#4f46e5" vertical>正在同步课表…</van-loading>
-      </div>
-      <template v-else>
         <div
-          v-if="viewMode === 'week'"
-          class="week-board"
-          :style="{ '--day-count': visibleDays.length }"
+          v-if="timetableStore.isLoading && !timetableStore.courses.length"
+          class="loading-state"
         >
-          <div class="dates-header">
-            <span class="axis-heading">节次</span>
+          <van-loading color="#4f46e5" vertical>正在同步课表…</van-loading>
+        </div>
+        <template v-else>
+          <div
+            v-if="viewMode === 'week'"
+            class="week-board"
+            :style="{ '--day-count': visibleDays.length }"
+          >
+            <div class="dates-header">
+              <span class="axis-heading">节次</span>
+              <div
+                v-for="day in visibleDays"
+                :key="day.index"
+                class="date-col"
+                :class="{ 'date-active': day.isToday }"
+              >
+                <span>{{ day.name }}</span
+                ><strong>{{ day.date.split("/")[1] }}</strong>
+              </div>
+            </div>
             <div
-              v-for="day in visibleDays"
-              :key="day.index"
-              class="date-col"
-              :class="{ 'date-active': day.isToday }"
+              v-for="(slot, section) in timeSlots"
+              :key="slot.name"
+              class="grid-row"
             >
-              <span>{{ day.name }}</span
-              ><strong>{{ day.date.split("/")[1] }}</strong>
+              <div class="time-axis">
+                <strong>{{ slot.name }}</strong
+                ><span>{{ slot.start }}</span
+                ><span>{{ slot.end }}</span>
+              </div>
+              <div
+                v-for="day in visibleDays"
+                :key="day.index"
+                class="grid-cell"
+                :class="{ 'today-column': day.isToday }"
+              >
+                <button
+                  v-for="course in courseAt(day.index, section)"
+                  :key="course.name"
+                  class="course-card"
+                  :style="{ '--course-color': course.displayColor }"
+                  :class="{ 'is-not-cur-week': !course.isCurrentWeek }"
+                  @click="openCourseDetail(course)"
+                >
+                  <span class="card-name">{{ course.name }}</span
+                  ><span class="card-room">{{
+                    course.classroom || "教室待定"
+                  }}</span
+                  ><span v-if="!course.isCurrentWeek" class="card-note"
+                    >非本周</span
+                  ><span v-if="course.hasConflict" class="card-note"
+                    >另有课程 · 查看</span
+                  >
+                </button>
+              </div>
             </div>
           </div>
-          <div
-            v-for="(slot, section) in timeSlots"
-            :key="slot.name"
-            class="grid-row"
-          >
-            <div class="time-axis">
-              <strong>{{ slot.name }}</strong
-              ><span>{{ slot.start }}</span
-              ><span>{{ slot.end }}</span>
-            </div>
-            <div
-              v-for="day in visibleDays"
-              :key="day.index"
-              class="grid-cell"
-              :class="{ 'today-column': day.isToday }"
-            >
+          <div v-else class="day-view">
+            <div class="day-selector" aria-label="选择日期">
               <button
-                v-for="course in courseAt(day.index, section)"
-                :key="course.name"
-                class="course-card"
-                :style="{ '--course-color': course.displayColor }"
-                :class="{ 'is-not-cur-week': !course.isCurrentWeek }"
-                @click="openCourseDetail(course)"
+                v-for="day in weekDateList"
+                :key="day.index"
+                :class="{ selected: selectedDay === day.index }"
+                :aria-pressed="selectedDay === day.index"
+                @click="selectedDay = day.index"
               >
-                <span class="card-name">{{ course.name }}</span
-                ><span class="card-room">{{
-                  course.classroom || "教室待定"
-                }}</span
-                ><span v-if="!course.isCurrentWeek" class="card-note"
-                  >非本周</span
-                ><span v-if="course.hasConflict" class="card-note"
-                  >另有课程 · 查看</span
-                >
+                <span>{{ day.name }}</span
+                ><strong>{{ day.date.split("/")[1] }}</strong
+                ><i v-if="day.isToday"></i>
               </button>
             </div>
-          </div>
-        </div>
-        <div v-else class="day-view">
-          <div class="day-selector" aria-label="选择日期">
+            <div class="day-heading">
+              <h2>
+                {{
+                  weekDateList[selectedDay].isToday
+                    ? "今日安排"
+                    : weekDateList[selectedDay].name + "的安排"
+                }}
+              </h2>
+              <span>第 {{ timetableStore.selectedWeek }} 周</span>
+            </div>
             <button
-              v-for="day in weekDateList"
-              :key="day.index"
-              :class="{ selected: selectedDay === day.index }"
-              :aria-pressed="selectedDay === day.index"
-              @click="selectedDay = day.index"
+              v-for="course in dayCourses"
+              :key="course.name + course.section"
+              class="agenda-card"
+              :style="{ '--course-color': course.displayColor }"
+              @click="openCourseDetail(course)"
             >
-              <span>{{ day.name }}</span
-              ><strong>{{ day.date.split("/")[1] }}</strong
-              ><i v-if="day.isToday"></i>
+              <div class="agenda-time">
+                <strong>{{ timeSlots[course.section]?.start }}</strong
+                ><span>{{ timeSlots[course.section]?.end }}</span>
+              </div>
+              <div class="agenda-info">
+                <h3>{{ course.name }}</h3>
+                <span
+                  ><van-icon name="location-o" />
+                  {{ course.classroom || "教室待定" }}</span
+                >
+                <p>
+                  {{ course.teacher || "教师待定" }} · 第
+                  {{ timeSlots[course.section]?.name }} 节
+                </p>
+              </div>
+              <van-icon name="arrow" />
             </button>
+            <van-empty
+              v-if="!dayCourses.length"
+              image="leaf"
+              description="当天没有课程，安排自己的节奏吧"
+            />
           </div>
-          <div class="day-heading">
-            <h2>
-              {{
-                weekDateList[selectedDay].isToday
-                  ? "今日安排"
-                  : weekDateList[selectedDay].name + "的安排"
-              }}
-            </h2>
-            <span>第 {{ timetableStore.selectedWeek }} 周</span>
+          <div v-if="!timetableStore.courses.length" class="empty-hint">
+            <span>{{
+              loadFailed ? "同步失败，可重试或检查网络" : "当前学期暂无课程"
+            }}</span
+            ><button @click="onRefresh">重新同步</button>
           </div>
-          <button
-            v-for="course in dayCourses"
-            :key="course.name + course.section"
-            class="agenda-card"
-            :style="{ '--course-color': course.displayColor }"
-            @click="openCourseDetail(course)"
-          >
-            <div class="agenda-time">
-              <strong>{{ timeSlots[course.section]?.start }}</strong
-              ><span>{{ timeSlots[course.section]?.end }}</span>
-            </div>
-            <div class="agenda-info">
-              <h3>{{ course.name }}</h3>
-              <span
-                ><van-icon name="location-o" />
-                {{ course.classroom || "教室待定" }}</span
-              >
-              <p>
-                {{ course.teacher || "教师待定" }} · 第
-                {{ timeSlots[course.section]?.name }} 节
-              </p>
-            </div>
-            <van-icon name="arrow" />
-          </button>
-          <van-empty
-            v-if="!dayCourses.length"
-            image="leaf"
-            description="当天没有课程，安排自己的节奏吧"
-          />
-        </div>
-        <div v-if="!timetableStore.courses.length" class="empty-hint">
-          <span>{{
-            loadFailed ? "同步失败，可重试或检查网络" : "当前学期暂无课程"
-          }}</span
-          ><button @click="onRefresh">重新同步</button>
-        </div>
-        <p v-else-if="viewMode === 'week'" class="board-hint">
-          <span class="hint-dot"></span> 点击课程查看详情
-          <span>浅灰卡片为非本周课程</span>
-        </p>
-      </template>
+          <p v-else-if="viewMode === 'week'" class="board-hint">
+            <span class="hint-dot"></span> 点击课程查看详情
+            <span>浅灰卡片为非本周课程</span>
+          </p>
+        </template>
+      </div>
     </van-pull-refresh>
 
     <van-popup
@@ -319,7 +328,7 @@
   </div>
 </template>
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { SessionExpiredError } from "../services/response";
 import { showToast } from "vant";
 import { useTimetableStore } from "../stores/timetable";
@@ -342,6 +351,10 @@ const viewMode = ref<"week" | "day">("day");
 const showWeekend = ref(false);
 const selectedDay = ref((new Date().getDay() + 6) % 7);
 
+watch(() => userStore.today, (today) => {
+  selectedDay.value = (new Date(`${today}T12:00:00`).getDay() + 6) % 7;
+});
+
 const weekDayLabels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
 const timeSlots = [
@@ -356,7 +369,7 @@ const timeSlots = [
  * 动态推算所选教学周 7 天的日期 (格式如 10/12, 10/13... 并在当天下方标出激活指示条)
  */
 const weekDateList = computed(() => {
-  const now = new Date();
+  const now = new Date(`${userStore.today}T12:00:00`);
   const currentDayOfWeek = (now.getDay() + 6) % 7; // 0=Mon ... 6=Sun
 
   // 以当周周一为基准
@@ -437,6 +450,63 @@ const nextWeek = () => {
   }
 };
 
+// Lock the gesture direction early so vertical scrolling/pull-to-refresh stays natural.
+let swipe: { x: number; y: number; axis: "pending" | "horizontal" | "vertical" } | null = null;
+let suppressClickUntil = 0;
+const cancelSwipe = () => { swipe = null; };
+const onSwipeStart = (event: TouchEvent) => {
+  suppressClickUntil = 0;
+  swipe = event.touches.length === 1 && !showDetailDialog.value && !showWeekPicker.value
+    ? { x: event.touches[0].clientX, y: event.touches[0].clientY, axis: "pending" }
+    : null;
+};
+const onSwipeMove = (event: TouchEvent) => {
+  if (!swipe) return;
+  if (event.touches.length !== 1) return cancelSwipe();
+  const dx = Math.abs(event.touches[0].clientX - swipe.x);
+  const dy = Math.abs(event.touches[0].clientY - swipe.y);
+  if (swipe.axis === "pending" && Math.max(dx, dy) > 10) {
+    swipe.axis = dx > dy * 1.4 ? "horizontal" : "vertical";
+  }
+  if (swipe.axis === "horizontal") {
+    if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
+  }
+};
+const onSwipeEnd = (event: TouchEvent) => {
+  const start = swipe;
+  cancelSwipe();
+  if (!start || event.touches.length || event.changedTouches.length !== 1) return;
+  const dx = event.changedTouches[0].clientX - start.x;
+  const dy = event.changedTouches[0].clientY - start.y;
+  if (start.axis === "vertical" || Math.abs(dx) < 10 || Math.abs(dx) <= Math.abs(dy) * 1.4) return;
+  // Avoid opening the course card when a drag ends on it.
+  suppressClickUntil = performance.now() + 400;
+  if (Math.abs(dx) < 60 || showDetailDialog.value || showWeekPicker.value) return;
+  if (viewMode.value === "week") {
+    dx < 0 ? nextWeek() : prevWeek();
+    return;
+  }
+  const nextDay = selectedDay.value + (dx < 0 ? 1 : -1);
+  if (nextDay > 6) {
+    if (timetableStore.selectedWeek >= 25) return;
+    nextWeek();
+    selectedDay.value = 0;
+  } else if (nextDay < 0) {
+    if (timetableStore.selectedWeek <= 1) return;
+    prevWeek();
+    selectedDay.value = 6;
+  } else {
+    selectedDay.value = nextDay;
+  }
+};
+const onSwipeClick = (event: MouseEvent) => {
+  if (event.detail && performance.now() < suppressClickUntil) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+};
+
 const selectWeek = (w: number) => {
   timetableStore.selectedWeek = w;
   showWeekPicker.value = false;
@@ -488,6 +558,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.schedule-swipe {
+  min-height: 55vh;
+}
+
 .sync-error {
   display: flex;
   gap: 12px;

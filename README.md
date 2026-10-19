@@ -1,3 +1,7 @@
+> 现支持 Android APK 和 PWA 网页版。苹果可用 Safari 添加到桌面并离线查看已同步数据，不提供 IPA。
+>
+> 网页版需要部署同源教务代理。完整安装、部署、离线使用与验证方法请看 [WEB-DEPLOY.md](WEB-DEPLOY.md)。
+
 # 山科小站 (SDUST Campus App) - Android 版
 
 专为**山东科技大学（SDUST）**定制的移动端教务助手 Android 原生体验应用。基于现代前端生态与 Capacitor 原生混合架构开发，重构自开源项目 `WindrunnerMax/SHST`。

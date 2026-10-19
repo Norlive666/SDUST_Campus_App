@@ -1,29 +1,66 @@
 <template>
   <div id="app-root">
     <router-view />
+    <UpdateNotice />
+    <PwaStatus />
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, onUnmounted } from "vue";
+import { App as NativeApp } from "@capacitor/app";
 import { StatusBar, Style } from "@capacitor/status-bar";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, type PluginListenerHandle } from "@capacitor/core";
+import PwaStatus from "./components/PwaStatus.vue";
+import UpdateNotice from "./components/UpdateNotice.vue";
+import { useUpdateStore } from "./stores/update";
 import { useUserStore } from "./stores/user";
 import { useTimetableStore } from "./stores/timetable";
 
 const userStore = useUserStore();
 const timetableStore = useTimetableStore();
 
+let timer: ReturnType<typeof setInterval>;
+let appListener: PluginListenerHandle | undefined;
+let disposed = false;
+const refreshCalendar = () => {
+  const previousWeek = userStore.curWeek;
+  userStore.syncCalendar();
+  if (timetableStore.selectedWeek === previousWeek) {
+    timetableStore.selectedWeek = userStore.curWeek;
+  }
+};
+const onVisible = () => {
+  if (document.visibilityState === "visible") refreshCalendar();
+};
 onMounted(async () => {
   userStore.init();
   timetableStore.init();
+  if (Capacitor.isNativePlatform()) void useUpdateStore().check();
+  timer = setInterval(refreshCalendar, 30_000);
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("focus", refreshCalendar);
 
   if (Capacitor.isNativePlatform()) {
+    try {
+      const listener = await NativeApp.addListener("appStateChange", ({ isActive }) => {
+        if (isActive) refreshCalendar();
+      });
+      if (disposed) await listener.remove();
+      else appListener = listener;
+    } catch (_) {}
     try {
       await StatusBar.setStyle({ style: Style.Light });
       await StatusBar.setBackgroundColor({ color: "#f6f7fb" });
     } catch (_) {}
   }
+});
+onUnmounted(() => {
+  disposed = true;
+  clearInterval(timer);
+  document.removeEventListener("visibilitychange", onVisible);
+  window.removeEventListener("focus", refreshCalendar);
+  void appListener?.remove();
 });
 </script>
 

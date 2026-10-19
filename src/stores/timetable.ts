@@ -30,7 +30,7 @@ function getCourseColor(name: string): string {
 export const useTimetableStore = defineStore('timetable', {
   state: () => ({
     courses: [] as CourseItem[],
-    selectedWeek: 7,
+    selectedWeek: useUserStore().curWeek,
     isLoading: false,
   }),
 
@@ -97,14 +97,14 @@ export const useTimetableStore = defineStore('timetable', {
       try {
         const result = await api.getTimetable(term);
 
-        // 如果服务端返回了真实当前学期与当前教学周，自动同步校准
+        // 同步服务端学期；教学周由日期与本地校准基准计算
         if (result.currentTerm) {
           userStore.setCurTerm(result.currentTerm);
         }
-        if (result.currentWeek && result.currentWeek > 0) {
-          userStore.setCurWeek(result.currentWeek);
-          this.selectedWeek = result.currentWeek;
-        }
+        // 教务页 zc 下拉框是查询条件，不能用它覆盖按日期计算的教学周。
+        const followedCurrentWeek = this.selectedWeek === userStore.curWeek;
+        userStore.syncCalendar();
+        if (followedCurrentWeek) this.selectedWeek = userStore.curWeek;
         // 如果课表中解析到了真实学生学籍信息，同步至 userStore
         if (result.studentInfo) {
           userStore.updateStudentInfo(result.studentInfo);

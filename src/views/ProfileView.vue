@@ -64,6 +64,11 @@
     </div>
     <div class="section-heading"><h2>关于应用</h2></div>
     <div class="settings-card">
+      <button class="setting-row" :disabled="updateStore.checking" @click="onCheckUpdate">
+        <span class="setting-icon lavender"><van-icon aria-hidden="true" name="upgrade" /></span>
+        <span class="setting-copy"><strong>检查更新</strong><small>{{ updateStore.checking ? "正在检查新版本…" : "检查是否有新版本" }}</small></span>
+        <van-loading v-if="updateStore.checking" size="17" /><van-icon v-else aria-hidden="true" name="arrow" class="row-arrow" />
+      </button>
       <button class="setting-row" @click="showAboutDialog = true">
         <span class="setting-icon sand"><van-icon aria-hidden="true" name="info-o" /></span
         ><span class="setting-copy"
@@ -73,6 +78,16 @@
         ><van-icon aria-hidden="true" name="arrow" class="row-arrow" />
       </button>
     </div>
+    <div v-if="pwa.web" class="settings-card pwa-install-card">
+      <button class="setting-row" @click="showInstall = true">
+        <span class="setting-icon lavender"><van-icon name="add-square" /></span>
+        <span class="setting-copy"><strong>添加到桌面</strong><small>{{ pwa.ready ? "已可离线打开，断网可查看缓存" : pwa.error ? "离线缓存准备失败，请联网重试" : "首次联网后准备离线缓存" }}</small></span>
+        <van-icon name="arrow" class="row-arrow" />
+      </button>
+    </div>
+    <van-dialog v-model:show="showInstall" title="添加到桌面" confirm-button-text="知道了">
+      <div class="install-help"><p>苹果手机：使用 Safari 打开本站，点击分享 → 添加到主屏幕；如有“作为网页 App 打开”，请开启。</p><p>安卓浏览器：在浏览器菜单中选择“安装应用”或“添加到主屏幕”。</p><p>请先联网完成登录和同步，并等待显示“已可离线打开”。断网后可查看已缓存的课表、成绩和考试；获取新数据仍需联网。</p></div>
+    </van-dialog>
     <div class="offline-note">
       <van-icon aria-hidden="true" name="shield-o" />
       <p>已同步的内容会自动保存在本机，<br />再次打开即可查看。</p>
@@ -138,14 +153,31 @@
   </main>
 </template>
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { showToast, showConfirmDialog } from "vant";
 import { useUserStore } from "../stores/user";
 import { useTimetableStore } from "../stores/timetable";
 import { api } from "../services/api";
 import PageHeader from "../components/PageHeader.vue";
-import { version } from "../../package.json";
+import { bundledVersion, getInstalledVersion } from "../services/app-update";
+import { useUpdateStore } from "../stores/update";
+import { Capacitor } from "@capacitor/core";
+import { pwa, checkWebUpdate } from "../services/pwa";
+const showInstall = ref(false);
+const onCheckUpdate = async () => {
+  if (Capacitor.isNativePlatform()) return updateStore.check(true);
+  if (!navigator.onLine) return showToast("当前离线，联网后可检查更新");
+  try {
+    await checkWebUpdate();
+    showToast(pwa.updateAvailable ? "发现网页新版本，请点击下方立即刷新" : "已检查网页版本，可继续使用");
+  } catch (_) { showToast("检查更新失败，请稍后重试"); }
+};
+const version = ref(bundledVersion);
+const updateStore = useUpdateStore();
+onMounted(async () => {
+  try { version.value = await getInstalledVersion(); } catch (_) {}
+});
 const router = useRouter();
 const userStore = useUserStore();
 const timetableStore = useTimetableStore();
@@ -237,6 +269,8 @@ const onLogout = async () => {
 };
 </script>
 <style scoped>
+.install-help { padding: 0 24px 20px; font-size: 13px; line-height: 1.8; color: #626b80; }
+.pwa-install-card { margin-top: 16px; }
 .user-card {
   border-radius: 22px;
   padding: 22px 20px;

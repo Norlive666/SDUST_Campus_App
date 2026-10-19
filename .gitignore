@@ -31,3 +31,7 @@ android/local.properties
 # Browser regression artifacts
 test-results/
 playwright-report/
+
+# Untracked local tools
+exam-deepseek/
+site-redesign/

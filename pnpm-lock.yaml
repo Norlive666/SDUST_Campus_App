@@ -14,16 +14,13 @@ importers:
       '@capacitor/app':
         specifier: ^6.0.1
         version: 6.0.3(@capacitor/core@6.2.2)
+      '@capacitor/browser':
+        specifier: ^6.0.6
+        version: 6.0.6(@capacitor/core@6.2.2)
       '@capacitor/core':
         specifier: ^6.1.2
         version: 6.2.2
-      '@capacitor/ios':
-        specifier: ^6.2.2
-        version: 6.2.2(@capacitor/core@6.2.2)
       '@capacitor/keyboard':
-        specifier: ^6.0.2
-        version: 6.0.4(@capacitor/core@6.2.2)
-      '@capacitor/preferences':
         specifier: ^6.0.2
         version: 6.0.4(@capacitor/core@6.2.2)
       '@capacitor/status-bar':
@@ -96,6 +93,11 @@ packages:
     peerDependencies:
       '@capacitor/core': ^6.0.0
 
+  '@capacitor/browser@6.0.6':
+    resolution: {integrity: sha512-VHOPkMR+JqKz2mf5YncnnOWvFdVYFTTLnPW+JRcsP1LobXmA0gtchER35PQ7XXqXU16eeacrehX+XF+rC6wmQw==}
+    peerDependencies:
+      '@capacitor/core': ^6.0.0
+
   '@capacitor/cli@6.2.2':
     resolution: {integrity: sha512-5wEYSHBzRKJKZnhD2sVJAP0t0kUT7o2/vlgEGzFE3t2w+inL9qMDN7zxg6pvqveJiPNZT2k93ZvJDdRKIn/w1w==}
     engines: {node: '>=18.0.0'}
@@ -104,18 +106,8 @@ packages:
   '@capacitor/core@6.2.2':
     resolution: {integrity: sha512-qEI3DcwJEPzhW+hVGKH8m4jbujtkdUiGkpMLHmpR8epACU7wEsV6NF8pCHzpsMYjc80oK7Cmpcw+MIienv/YRw==}
 
-  '@capacitor/ios@6.2.2':
-    resolution: {integrity: sha512-dc9upo3L5wSUVJBJnd7oRGGsiwB2rMe7ZF2bti8hvDVCAZeYMzzw8iqxuUc6cvGBhH2/LsORMBO51/vEQhdmHg==}
-    peerDependencies:
-      '@capacitor/core': ^6.2.0
-
   '@capacitor/keyboard@6.0.4':
     resolution: {integrity: sha512-tNeyQGxIOTiSv3g+dTxJ/plVpGMnB4daJuCHz1E2Kelo+jOx+FKlyFY9L1Ow144SCzuXK48NXr8WoxXfXgQEKA==}
-    peerDependencies:
-      '@capacitor/core': ^6.0.0
-
-  '@capacitor/preferences@6.0.4':
-    resolution: {integrity: sha512-ziauSI1pgdyl+gduvvf8lInvzF3Wdyu/ok+u7NlnhKp8XOj9plJgtnXZWFiR8CiCK5wMvo+gFaNh3zhMyEUwpA==}
     peerDependencies:
       '@capacitor/core': ^6.0.0
 
@@ -1155,6 +1147,10 @@ snapshots:
     dependencies:
       '@capacitor/core': 6.2.2
 
+  '@capacitor/browser@6.0.6(@capacitor/core@6.2.2)':
+    dependencies:
+      '@capacitor/core': 6.2.2
+
   '@capacitor/cli@6.2.2':
     dependencies:
       '@ionic/cli-framework-output': 2.2.8
@@ -1181,15 +1177,7 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@capacitor/ios@6.2.2(@capacitor/core@6.2.2)':
-    dependencies:
-      '@capacitor/core': 6.2.2
-
   '@capacitor/keyboard@6.0.4(@capacitor/core@6.2.2)':
-    dependencies:
-      '@capacitor/core': 6.2.2
-
-  '@capacitor/preferences@6.0.4(@capacitor/core@6.2.2)':
     dependencies:
       '@capacitor/core': 6.2.2
 

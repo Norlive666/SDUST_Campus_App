@@ -16,3 +16,6 @@ app.use(router);
 app.use(Vant);
 
 app.mount("#app");
+
+import { startPwa } from "./services/pwa";
+startPwa();

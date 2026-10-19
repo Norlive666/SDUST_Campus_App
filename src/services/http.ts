@@ -17,7 +17,7 @@ class HttpService {
     if (Capacitor.isNativePlatform()) {
       return SDUST_BASE_URL;
     }
-    // Web 浏览器开发环境走 Vite 代理，避免跨域
+    // Web/PWA uses the same-origin production proxy (Vite proxies it in development).
     return WEB_PROXY_BASE_URL;
   }
 
@@ -45,7 +45,23 @@ class HttpService {
     } catch (_) {}
     if (Capacitor.isNativePlatform()) {
       await CapacitorCookies.clearCookies({ url: SDUST_BASE_URL });
+    } else {
+      try { localStorage.setItem("sdust_pending_session_clear", "1"); } catch (_) {}
+      try { await this.clearWebCookie(); }
+      catch (_) { /* Retry before the next web query after an offline logout. */ }
     }
+  }
+
+  private async clearWebCookie() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
+    try {
+      const response = await fetch(`${WEB_PROXY_BASE_URL}__session`, {
+        method: "DELETE", credentials: "same-origin", headers: { "X-SDUST-Client": "1" }, signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("会话清理失败，请联网后重试");
+      try { localStorage.removeItem("sdust_pending_session_clear"); } catch (_) {}
+    } finally { clearTimeout(timer); }
   }
 
   public async request<T = string>(options: {
@@ -123,10 +139,14 @@ class HttpService {
         headers: nativeRes.headers,
       };
     } else {
+      let pendingClear = false;
+      try { pendingClear = localStorage.getItem("sdust_pending_session_clear") === "1"; } catch (_) {}
+      if (pendingClear) await this.clearWebCookie();
+      headers["X-SDUST-Client"] = "1";
       delete headers["User-Agent"];
       delete headers["Cookie"];
       delete headers["cookie"];
-      // 浏览器 Web 调试环境
+      // Browser/PWA: cookies are managed as HttpOnly cookies by the same-origin proxy.
       let requestUrl = fullUrl;
       if (options.params) {
         const query = new URLSearchParams(options.params).toString();

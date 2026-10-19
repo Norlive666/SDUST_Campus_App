@@ -6,25 +6,31 @@ import { api } from "../services/api";
 import { readPersistedUser } from "../services/session-state";
 import { calculateCurrentTermAndWeek, StudentInfo } from "../services/parser";
 
-const initialTermAndWeek = calculateCurrentTermAndWeek();
+import { mondayOf, weekFromAnchor } from "../services/teaching-week";
 
 export const useUserStore = defineStore("user", {
-  state: () => ({
-    isLoggedIn: false,
-    account: "",
-    name: "山科同学",
-    college: "山东科技大学",
-    major: "本科专业",
-    className: "",
-    curTerm: initialTermAndWeek.term, // 动态推算当前学期 如 2026-2027-1
-    curWeek: initialTermAndWeek.week, // 动态推算当前第几周
-  }),
+  state: () => {
+    const initialTermAndWeek = calculateCurrentTermAndWeek();
+    return {
+      isLoggedIn: false,
+      account: "",
+      name: "山科同学",
+      college: "山东科技大学",
+      major: "本科专业",
+      className: "",
+      curTerm: initialTermAndWeek.term, // 动态推算当前学期 如 2026-2027-1
+      curWeek: initialTermAndWeek.week,
+      weekAnchor: null as { term: string; week: number; monday: string } | null,
+      today: mondayOf(new Date(), false),
+    };
+  },
 
   actions: {
     init() {
       const saved = readPersistedUser();
       if (saved) Object.assign(this, saved);
       else this.$reset();
+      this.syncCalendar();
     },
 
     save() {
@@ -40,6 +46,7 @@ export const useUserStore = defineStore("user", {
             className: this.className,
             curTerm: this.curTerm,
             curWeek: this.curWeek,
+            weekAnchor: this.weekAnchor,
           }),
         );
       } catch (_) {}
@@ -105,14 +112,34 @@ export const useUserStore = defineStore("user", {
       await Promise.all([credentials.clear(), http.clearCookie()]);
     },
 
+    syncCalendar(now = new Date()) {
+      const fallback = calculateCurrentTermAndWeek(now);
+      // 老版本只存周数，没有日期；用日期推算迁移，避免把过期的第七周当成今天。
+      if (!this.weekAnchor || this.weekAnchor.term !== this.curTerm ||
+          weekFromAnchor(this.weekAnchor, now) === null) {
+        this.weekAnchor = {
+          term: this.curTerm,
+          week: this.curTerm === fallback.term ? fallback.week : this.curWeek,
+          monday: mondayOf(now),
+        };
+      }
+      this.curWeek = weekFromAnchor(this.weekAnchor, now)!;
+      this.today = mondayOf(now, false);
+      if (this.isLoggedIn) this.save();
+    },
+
     setCurWeek(week: number) {
+      if (!Number.isInteger(week) || week < 1 || week > 25) return;
       this.curWeek = week;
+      this.weekAnchor = { term: this.curTerm, week, monday: mondayOf(new Date()) };
       this.save();
     },
 
     setCurTerm(term: string) {
+      if (this.curTerm === term) return;
       this.curTerm = term;
-      this.save();
+      this.weekAnchor = null;
+      this.syncCalendar();
     },
   },
 });

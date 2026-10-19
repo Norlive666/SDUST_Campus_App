@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 const loginHtml =
   '<form action="/jsxsd/xk/LoginToXk"><input name="userAccount"><input name="userPassword"><input name="RANDOMCODE"></form>';
