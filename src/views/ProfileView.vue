@@ -85,6 +85,21 @@
         <van-loading v-if="addingWidget" size="17" /><van-icon v-else name="arrow" class="row-arrow" />
       </button>
     </div>
+    <div v-if="supportsTimetableNotification()" class="settings-card pwa-install-card">
+      <div class="setting-row">
+        <span class="setting-icon lavender"><van-icon name="bell" /></span>
+        <span class="setting-copy"><strong id="notification-label">锁屏课表通知</strong>
+          <small>{{ !timetableNotification.loaded ? "正在读取通知设置…" : !timetableNotification.enabled ? "已关闭" : !timetableNotification.allowed ? "开关已开启，需允许系统通知权限" : "显示今日课程、时间和教室，静默更新" }}</small>
+        </span>
+        <van-switch :model-value="timetableNotification.enabled" :loading="timetableNotification.busy"
+          :disabled="!timetableNotification.loaded" size="22px" aria-labelledby="notification-label" @update:model-value="onNotificationToggle" />
+      </div>
+      <button v-if="timetableNotification.enabled" class="setting-row" @click="onNotificationSettings">
+        <span class="setting-icon sand"><van-icon name="setting-o" /></span>
+        <span class="setting-copy"><strong>锁屏显示设置</strong><small>请允许锁屏通知并显示通知内容</small></span>
+        <van-icon name="arrow" class="row-arrow" />
+      </button>
+    </div>
     <van-dialog v-model:show="showWidgetHelp" title="添加今日课表" confirm-button-text="知道了">
       <div class="install-help"><p>长按桌面空白处 → 小部件（或安卓小部件）→ 山科小站 → 今日课表，将它拖到桌面。</p><p>先在应用中登录并同步一次课表。小部件使用已同步数据，点击可打开应用，右上角按钮用于更新日期和课程显示。</p></div>
     </van-dialog>
@@ -175,6 +190,17 @@ import { useUpdateStore } from "../stores/update";
 import { Capacitor } from "@capacitor/core";
 import { pwa, checkWebUpdate } from "../services/pwa";
 import { makeWidgetSnapshot, syncTimetableWidget, requestTimetableWidget, supportsNativeWidget } from "../services/timetable-widget";
+import { timetableNotification, supportsTimetableNotification, refreshNotificationStatus, setTimetableNotification, openNotificationSettings } from "../services/timetable-notification";
+const onNotificationToggle = async (enabled: boolean) => {
+  try {
+    await setTimetableNotification(enabled);
+    showToast(!enabled ? "已关闭锁屏课表通知" : timetableNotification.allowed ? "已开启锁屏课表通知" : "请在系统设置中允许通知");
+  } catch (_) { showToast("通知设置未保存，请重试"); }
+};
+const onNotificationSettings = async () => {
+  try { await openNotificationSettings(); }
+  catch (_) { showToast("请前往系统设置 → 应用 → 山科小站 → 通知管理"); }
+};
 const addingWidget = ref(false);
 const showWidgetHelp = ref(false);
 const onAddWidget = async () => {
@@ -199,6 +225,7 @@ const onCheckUpdate = async () => {
 const version = ref(bundledVersion);
 const updateStore = useUpdateStore();
 onMounted(async () => {
+  void refreshNotificationStatus().catch(() => { showToast("通知设置读取失败，请重新进入本页"); });
   try { version.value = await getInstalledVersion(); } catch (_) {}
 });
 const router = useRouter();

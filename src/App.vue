@@ -8,6 +8,8 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from "vue";
+import { useRouter } from "vue-router";
+import { initializeTimetableNotification, refreshNotificationStatus, consumeNotificationOpen } from "./services/timetable-notification";
 import { App as NativeApp } from "@capacitor/app";
 import { StatusBar, Style } from "@capacitor/status-bar";
 import { Capacitor, type PluginListenerHandle } from "@capacitor/core";
@@ -18,6 +20,11 @@ import { useUpdateStore } from "./stores/update";
 import { useUserStore } from "./stores/user";
 import { useTimetableStore } from "./stores/timetable";
 
+const router = useRouter();
+const openNotification = async () => {
+  if (await consumeNotificationOpen()) await router.push("/timetable");
+};
+const onNotificationOpen = () => { void openNotification().catch(() => {}); };
 const userStore = useUserStore();
 const timetableStore = useTimetableStore();
 
@@ -43,10 +50,12 @@ onMounted(async () => {
       () => [userStore.isLoggedIn, userStore.account, userStore.curTerm, userStore.weekAnchor, timetableStore.courses],
       () => {
         const snapshot = makeWidgetSnapshot(userStore, timetableStore.courses, localStorage.getItem("shst_timetable") !== null);
-        void syncTimetableWidget(snapshot).catch(() => {});
+        void syncTimetableWidget(snapshot).then(() => initializeTimetableNotification()).catch(() => {});
       }, { deep: true, immediate: true },
     );
   }
+  window.addEventListener("timetable-notification-open", onNotificationOpen);
+  onNotificationOpen();
   if (Capacitor.isNativePlatform()) void useUpdateStore().check();
   timer = setInterval(refreshCalendar, 30_000);
   document.addEventListener("visibilitychange", onVisible);
@@ -55,7 +64,11 @@ onMounted(async () => {
   if (Capacitor.isNativePlatform()) {
     try {
       const listener = await NativeApp.addListener("appStateChange", ({ isActive }) => {
-        if (isActive) refreshCalendar();
+        if (isActive) {
+          refreshCalendar();
+          void refreshNotificationStatus().catch(() => {});
+          onNotificationOpen();
+        }
       });
       if (disposed) await listener.remove();
       else appListener = listener;
@@ -69,6 +82,7 @@ onMounted(async () => {
 onUnmounted(() => {
   disposed = true;
   stopWidgetSync?.();
+  window.removeEventListener("timetable-notification-open", onNotificationOpen);
   clearInterval(timer);
   document.removeEventListener("visibilitychange", onVisible);
   window.removeEventListener("focus", refreshCalendar);

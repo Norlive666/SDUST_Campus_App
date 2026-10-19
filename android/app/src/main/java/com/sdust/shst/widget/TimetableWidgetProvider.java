@@ -12,6 +12,7 @@ import android.view.View;
 import android.widget.RemoteViews;
 import com.sdust.shst.MainActivity;
 import com.sdust.shst.R;
+import com.sdust.shst.notification.TimetableNotification;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.List;
@@ -27,7 +28,8 @@ public class TimetableWidgetProvider extends AppWidgetProvider {
         AppWidgetManager manager = AppWidgetManager.getInstance(context);
         int[] ids = manager.getAppWidgetIds(new ComponentName(context, TimetableWidgetProvider.class));
         for (int id : ids) render(context, manager, id);
-        schedule(context, ids.length > 0);
+        boolean notificationActive = TimetableNotification.refresh(context);
+        schedule(context, ids.length > 0 || notificationActive);
     }
     private static void schedule(Context context, boolean enabled) {
         AlarmManager alarms = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
@@ -96,7 +98,7 @@ public class TimetableWidgetProvider extends AppWidgetProvider {
     @Override public void onUpdate(Context context, AppWidgetManager manager, int[] ids) { refreshAll(context); }
     @Override public void onAppWidgetOptionsChanged(Context context, AppWidgetManager manager, int id, Bundle options) { render(context, manager, id); }
     @Override public void onEnabled(Context context) { refreshAll(context); }
-    @Override public void onDisabled(Context context) { schedule(context, false); }
+    @Override public void onDisabled(Context context) { refreshAll(context); }
     @Override public void onReceive(Context context, Intent intent) {
         super.onReceive(context, intent);
         String action = intent.getAction();

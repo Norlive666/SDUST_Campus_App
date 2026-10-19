@@ -6,7 +6,7 @@ const directory = mkdtempSync(join(tmpdir(), 'sdust-widget-'));
 const binary = name => process.env.JAVA_HOME ? join(process.env.JAVA_HOME, 'bin', name + (process.platform === 'win32' ? '.exe' : '')) : name;
 try {
   for (const [command, args] of [
-    [binary('javac'), ['-d', directory, 'android/app/src/main/java/com/sdust/shst/widget/WidgetSchedule.java', 'tests/native/WidgetScheduleCheck.java']],
+    [binary('javac'), ['-d', directory, 'android/app/src/main/java/com/sdust/shst/widget/WidgetSchedule.java', 'android/app/src/main/java/com/sdust/shst/notification/NotificationContent.java', 'tests/native/WidgetScheduleCheck.java']],
     [binary('java'), ['-cp', directory, 'WidgetScheduleCheck']],
   ]) {
     const result = spawnSync(command, args, { stdio: 'inherit' });

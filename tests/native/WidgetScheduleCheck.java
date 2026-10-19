@@ -1,4 +1,5 @@
 import com.sdust.shst.widget.WidgetSchedule;
+import com.sdust.shst.notification.NotificationContent;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
@@ -36,6 +37,16 @@ public class WidgetScheduleCheck {
         equal(WidgetSchedule.firstUpcoming(today, 590), 1);
         equal(WidgetSchedule.firstUpcoming(today, 1100), 2);
         equal(WidgetSchedule.today(Arrays.asList(morning), 8, date("Asia/Shanghai", 2026, 10, 20)).size(), 0);
+        equal(new NotificationContent(today, 420).title, "上午");
+        equal(new NotificationContent(today, 500).title, "上午");
+        equal(new NotificationContent(today, 590).title, "下午");
+        equal(new NotificationContent(today, 1400).title, "今日课程已结束");
+        equal(new NotificationContent(java.util.Collections.emptyList(), 480).title, "今天没有课程");
+        equal(new NotificationContent(today, 1400).expanded.contains("上午"), true);
+        equal(new NotificationContent(today, 420).subtitle, WidgetSchedule.TIMES[0] + " · J2");
+        WidgetSchedule.Course noRoom = new WidgetSchedule.Course("未排教室", "", 0, 0, Arrays.asList(8));
+        equal(new NotificationContent(Arrays.asList(noRoom), 420).subtitle.endsWith("教室待定"), true);
+        equal(new NotificationContent(java.util.Collections.nCopies(15, morning), 420).expanded.contains("还有更多课程"), true);
         System.out.println("Widget schedule: " + checks + " checks passed");
     }
 }
