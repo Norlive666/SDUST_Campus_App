@@ -1,0 +1,14 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="12dp" android:background="@drawable/widget_background">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="36dp" android:gravity="center_vertical" android:orientation="horizontal">
+        <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:orientation="vertical">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/widget_title" android:textSize="15sp" android:textStyle="bold" android:textColor="#3C315E" />
+            <TextView android:id="@+id/widget_date" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="10sp" android:singleLine="true" android:ellipsize="end" android:textColor="#7A6E93" />
+        </LinearLayout>
+        <ImageView android:id="@+id/widget_refresh" android:layout_width="36dp" android:layout_height="36dp" android:padding="8dp" android:src="@drawable/widget_refresh_icon" android:background="@drawable/widget_refresh_background" android:scaleType="centerInside" android:contentDescription="@string/widget_refresh" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/widget_courses" android:visibility="gone" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="vertical" />
+    <TextView android:id="@+id/widget_empty" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:gravity="center" android:padding="12dp" android:text="@string/widget_initial" android:textSize="13sp" android:textColor="#7A6E93" />
+    <TextView android:id="@+id/widget_footer" android:layout_width="match_parent" android:layout_height="24dp" android:gravity="center_vertical" android:singleLine="true" android:ellipsize="end" android:textSize="10sp" android:textColor="#8D82A3" android:text="@string/widget_initial" />
+</LinearLayout>

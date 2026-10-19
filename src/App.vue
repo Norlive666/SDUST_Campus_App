@@ -7,10 +7,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted, watch } from "vue";
 import { App as NativeApp } from "@capacitor/app";
 import { StatusBar, Style } from "@capacitor/status-bar";
 import { Capacitor, type PluginListenerHandle } from "@capacitor/core";
+import { makeWidgetSnapshot, syncTimetableWidget, supportsNativeWidget } from "./services/timetable-widget";
 import PwaStatus from "./components/PwaStatus.vue";
 import UpdateNotice from "./components/UpdateNotice.vue";
 import { useUpdateStore } from "./stores/update";
@@ -23,6 +24,7 @@ const timetableStore = useTimetableStore();
 let timer: ReturnType<typeof setInterval>;
 let appListener: PluginListenerHandle | undefined;
 let disposed = false;
+let stopWidgetSync: (() => void) | undefined;
 const refreshCalendar = () => {
   const previousWeek = userStore.curWeek;
   userStore.syncCalendar();
@@ -36,6 +38,15 @@ const onVisible = () => {
 onMounted(async () => {
   userStore.init();
   timetableStore.init();
+  if (supportsNativeWidget()) {
+    stopWidgetSync = watch(
+      () => [userStore.isLoggedIn, userStore.account, userStore.curTerm, userStore.weekAnchor, timetableStore.courses],
+      () => {
+        const snapshot = makeWidgetSnapshot(userStore, timetableStore.courses, localStorage.getItem("shst_timetable") !== null);
+        void syncTimetableWidget(snapshot).catch(() => {});
+      }, { deep: true, immediate: true },
+    );
+  }
   if (Capacitor.isNativePlatform()) void useUpdateStore().check();
   timer = setInterval(refreshCalendar, 30_000);
   document.addEventListener("visibilitychange", onVisible);
@@ -57,6 +68,7 @@ onMounted(async () => {
 });
 onUnmounted(() => {
   disposed = true;
+  stopWidgetSync?.();
   clearInterval(timer);
   document.removeEventListener("visibilitychange", onVisible);
   window.removeEventListener("focus", refreshCalendar);

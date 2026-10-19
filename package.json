@@ -14,7 +14,8 @@
     "test": "playwright test",
     "start:web": "node server/app.mjs",
     "test:server": "node --test server/*.test.mjs",
-    "test:pwa": "playwright test --config playwright.pwa.config.ts"
+    "test:pwa": "playwright test --config playwright.pwa.config.ts",
+    "test:widget": "node scripts/test-widget.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^6.1.2",

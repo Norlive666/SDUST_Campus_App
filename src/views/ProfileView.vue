@@ -78,6 +78,16 @@
         ><van-icon aria-hidden="true" name="arrow" class="row-arrow" />
       </button>
     </div>
+    <div v-if="supportsNativeWidget()" class="settings-card pwa-install-card">
+      <button class="setting-row" :disabled="addingWidget" @click="onAddWidget">
+        <span class="setting-icon lavender"><van-icon name="apps-o" /></span>
+        <span class="setting-copy"><strong>添加桌面课表小部件</strong><small>在桌面查看今天课程，离线也能显示</small></span>
+        <van-loading v-if="addingWidget" size="17" /><van-icon v-else name="arrow" class="row-arrow" />
+      </button>
+    </div>
+    <van-dialog v-model:show="showWidgetHelp" title="添加今日课表" confirm-button-text="知道了">
+      <div class="install-help"><p>长按桌面空白处 → 小部件（或安卓小部件）→ 山科小站 → 今日课表，将它拖到桌面。</p><p>先在应用中登录并同步一次课表。小部件使用已同步数据，点击可打开应用，右上角按钮用于更新日期和课程显示。</p></div>
+    </van-dialog>
     <div v-if="pwa.web" class="settings-card pwa-install-card">
       <button class="setting-row" @click="showInstall = true">
         <span class="setting-icon lavender"><van-icon name="add-square" /></span>
@@ -164,6 +174,19 @@ import { bundledVersion, getInstalledVersion } from "../services/app-update";
 import { useUpdateStore } from "../stores/update";
 import { Capacitor } from "@capacitor/core";
 import { pwa, checkWebUpdate } from "../services/pwa";
+import { makeWidgetSnapshot, syncTimetableWidget, requestTimetableWidget, supportsNativeWidget } from "../services/timetable-widget";
+const addingWidget = ref(false);
+const showWidgetHelp = ref(false);
+const onAddWidget = async () => {
+  addingWidget.value = true;
+  try {
+    await syncTimetableWidget(makeWidgetSnapshot(userStore, timetableStore.courses, localStorage.getItem("shst_timetable") !== null));
+    const result = await requestTimetableWidget();
+    if (result.supported && result.requested) showToast("请在桌面确认添加课表小部件");
+    else showWidgetHelp.value = true;
+  } catch (_) { showWidgetHelp.value = true; }
+  finally { addingWidget.value = false; }
+};
 const showInstall = ref(false);
 const onCheckUpdate = async () => {
   if (Capacitor.isNativePlatform()) return updateStore.check(true);

@@ -4,4 +4,8 @@
     <string name="title_activity_main">山科小站</string>
     <string name="package_name">com.sdust.shst</string>
     <string name="custom_url_scheme">com.sdust.shst</string>
+    <string name="widget_title">今日课表</string>
+    <string name="widget_description">离线显示今天课程、教室和教学周，点击打开山科小站</string>
+    <string name="widget_refresh">更新小部件显示</string>
+    <string name="widget_initial">打开山科小站同步课表</string>
 </resources>

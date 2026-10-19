@@ -1,4 +1,6 @@
-> 现支持 Android APK 和 PWA 网页版。苹果可用 Safari 添加到桌面并离线查看已同步数据，不提供 IPA。
+> 现支持 Android APK（含今日课表桌面小部件）和 PWA 网页版。苹果可用 Safari 添加到桌面并离线查看已同步数据，不提供 IPA。
+>
+> 安卓小部件添加与使用请看 [ANDROID-WIDGET.md](ANDROID-WIDGET.md)。
 >
 > 网页版需要部署同源教务代理。完整安装、部署、离线使用与验证方法请看 [WEB-DEPLOY.md](WEB-DEPLOY.md)。
 
