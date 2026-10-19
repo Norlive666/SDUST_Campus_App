@@ -21,10 +21,24 @@ android {
             outputFileName = "SDUST_Campus_v${variant.versionName}.apk"
         }
     }
+    signingConfigs {
+        release {
+            storeFile file("sdust_release.keystore")
+            storePassword "sdustcampus"
+            keyAlias "sdust"
+            keyPassword "sdustcampus"
+            v1SigningEnabled true
+            v2SigningEnabled true
+        }
+    }
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            signingConfig signingConfigs.release
         }
     }
 }

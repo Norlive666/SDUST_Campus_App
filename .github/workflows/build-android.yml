@@ -79,8 +79,8 @@ jobs:
           BUILD_VERSION: 1.0.${{ github.run_number }}
         run: |
           cd android
-          ./gradlew assembleDebug --stacktrace
-          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          ./gradlew assembleRelease --stacktrace
+          APK_PATH=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
           cp "$APK_PATH" "../SDUST_Campus_v1.0.${{ github.run_number }}.apk"
 
       - name: Upload Android Artifact

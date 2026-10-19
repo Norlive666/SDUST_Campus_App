@@ -113,3 +113,20 @@ test("browser-generated touch input switches weeks without opening a course", as
   await expect(page.getByRole("dialog")).toBeHidden();
   await cdp.detach();
 });
+
+test("schedule transitions follow swipe direction and respect reduced motion", async ({ page }) => {
+  await page.getByRole("button", { name: "周课表", exact: true }).click();
+  await expect(page.locator(".week-board")).toBeVisible();
+  await expect(page.locator(".schedule-page")).not.toHaveClass(/active/);
+  await swipe(page, -120);
+  await expect(page.locator(".schedule-next-leave-active, .schedule-next-enter-active")).toHaveCount(1);
+  await expect(page.locator(".schedule-page")).not.toHaveClass(/active/);
+  await swipe(page, 120);
+  await expect(page.locator(".schedule-prev-leave-active, .schedule-prev-enter-active")).toHaveCount(1);
+  await expect(page.locator(".schedule-page")).not.toHaveClass(/active/);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await swipe(page, -120);
+  await expect(title(page)).toContainText("第 9 周");
+  expect(await page.locator(".schedule-page").evaluate(el =>
+    parseFloat(getComputedStyle(el).transitionDuration))).toBeLessThan(0.001);
+});

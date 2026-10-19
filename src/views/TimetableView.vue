@@ -90,6 +90,8 @@
         @touchcancel="cancelSwipe"
         @click.capture="onSwipeClick"
       >
+        <Transition :name="slideDirection" mode="out-in">
+        <div :key="schedulePageKey" class="schedule-page">
         <div
           v-if="timetableStore.isLoading && !timetableStore.courses.length"
           class="loading-state"
@@ -216,6 +218,8 @@
             <span>浅灰卡片为非本周课程</span>
           </p>
         </template>
+        </div>
+        </Transition>
       </div>
     </van-pull-refresh>
 
@@ -450,6 +454,15 @@ const nextWeek = () => {
   }
 };
 
+// Batch week/day changes so Sunday → Monday keeps the same slide direction.
+const slideDirection = ref("schedule-next");
+const schedulePosition = computed(() => timetableStore.selectedWeek * 7 +
+  (viewMode.value === "week" ? 0 : selectedDay.value));
+const schedulePageKey = computed(() => `${viewMode.value}-${schedulePosition.value}`);
+watch(schedulePosition, (next, previous) => {
+  slideDirection.value = next >= previous ? "schedule-next" : "schedule-prev";
+});
+
 // Lock the gesture direction early so vertical scrolling/pull-to-refresh stays natural.
 let swipe: { x: number; y: number; axis: "pending" | "horizontal" | "vertical" } | null = null;
 let suppressClickUntil = 0;
@@ -560,6 +573,37 @@ onMounted(() => {
 <style scoped>
 .schedule-swipe {
   min-height: 55vh;
+  overflow: hidden;
+}
+.schedule-page {
+  width: 100%;
+}
+.schedule-next-enter-active,
+.schedule-prev-enter-active {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out;
+}
+.schedule-next-leave-active,
+.schedule-prev-leave-active {
+  transition: transform 90ms ease-in, opacity 90ms ease-in;
+  pointer-events: none;
+}
+.schedule-next-enter-from,
+.schedule-prev-leave-to {
+  transform: translateX(24px);
+  opacity: 0;
+}
+.schedule-prev-enter-from,
+.schedule-next-leave-to {
+  transform: translateX(-24px);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .schedule-next-enter-active,
+  .schedule-prev-enter-active,
+  .schedule-next-leave-active,
+  .schedule-prev-leave-active {
+    transition: none;
+  }
 }
 
 .sync-error {
