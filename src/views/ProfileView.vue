@@ -35,6 +35,12 @@
         ><small>校准周次 <van-icon aria-hidden="true" name="arrow" /></small>
       </button>
     </section>
+    <div class="settings-card">
+      <div class="setting-row">
+        <span class="setting-copy"><strong>自动切换学期</strong><small>按日期估算；开学日期请按学校校历校准周次</small></span>
+        <van-switch :model-value="userStore.automaticTerm" size="22px" aria-label="自动切换学期" @update:model-value="userStore.setAutomaticTerm" />
+      </div>
+    </div>
     <div class="section-heading">
       <h2>教务与数据</h2>
       <span>按需管理，随时同步</span>
@@ -206,7 +212,7 @@ const showWidgetHelp = ref(false);
 const onAddWidget = async () => {
   addingWidget.value = true;
   try {
-    await syncTimetableWidget(makeWidgetSnapshot(userStore, timetableStore.courses, localStorage.getItem("shst_timetable") !== null));
+    await syncTimetableWidget(makeWidgetSnapshot(userStore, timetableStore.courses, timetableStore.hasCache));
     const result = await requestTimetableWidget();
     if (result.supported && result.requested) showToast("请在桌面确认添加课表小部件");
     else showWidgetHelp.value = true;
@@ -273,7 +279,7 @@ const onSelectTerm = async (action: { value: string }) => {
     await timetableStore.fetchTimetable(action.value);
     showToast("学期已切换，课表已同步");
   } catch (_) {
-    showToast("学期已切换，同步失败，已保留原有课表");
+    showToast("学期已切换，同步失败；该学期暂无可用缓存");
   }
 };
 const onSelectWeek = (w: number) => {
@@ -296,7 +302,7 @@ const onClearCache = async () => {
   }
   for (const key of ["shst_timetable", "shst_grades", "shst_exams"])
     localStorage.removeItem(key);
-  timetableStore.courses = [];
+  timetableStore.clear();
   showToast({ type: "success", message: "离线缓存已清理" });
 };
 const onLogout = async () => {

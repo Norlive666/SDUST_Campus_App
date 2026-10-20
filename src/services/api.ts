@@ -9,6 +9,7 @@ import {
 import { encodeCredentials } from "./encrypt";
 import {
   parseTimetableHtml,
+  dataRows,
   parseGradesHtml,
   parseExamsHtml,
   parseStudentInfoHtml,
@@ -110,6 +111,36 @@ class ApiService {
     if (response.status < 200 || response.status >= 300)
       throw new Error("教务请求失败，请检查校园网后重试");
     return response;
+  }
+
+  private async queryPages<T>(options: Parameters<typeof http.request>[0], kind: "grades" | "exams", parse: (source: any) => T[]): Promise<T[]> {
+    const version = this.sessionVersion;
+    const rows: T[] = [];
+    const seen = new Set<string>();
+    for (let page = 1; page <= 50; page++) {
+      const request = { ...options };
+      if (request.method === "GET") request.params = { ...options.params, pageNum: page };
+      else request.data = { ...(typeof options.data === "object" ? options.data : {}), pageNum: page };
+      const response = await this.authenticatedRequest(request);
+      if (version !== this.sessionVersion) throw new SessionExpiredError();
+      requireDataPage(response.data, kind);
+      const parsed = parse(response.data);
+      let json: any = response.data;
+      if (typeof json === "string") { try { json = JSON.parse(json); } catch (_) { json = null; } }
+      const metadata = json?.data && !Array.isArray(json.data) ? json.data : json;
+      const total = Number(metadata?.total ?? metadata?.recordsTotal ?? json?.total);
+      const pages = Number(metadata?.pages ?? metadata?.totalPages);
+      const hasMore = Number.isFinite(total) ? rows.length + parsed.length < total : Number.isFinite(pages) ? page < pages : metadata?.hasNext === true;
+      if (parsed.length) {
+        const fingerprint = JSON.stringify(dataRows(json).length ? dataRows(json) : parsed);
+        if (seen.has(fingerprint)) throw new Error("教务分页返回了重复数据，未覆盖缓存");
+        seen.add(fingerprint);
+      }
+      rows.push(...parsed);
+      if (!hasMore) return rows;
+      if (!parsed.length) throw new Error("教务分页数据不完整，已保留缓存");
+    }
+    throw new Error("教务分页超过查询上限，已保留缓存");
   }
 
   /**
@@ -324,7 +355,7 @@ class ApiService {
         url: "kscj/cjcx_query",
         method: "GET",
       });
-    } catch (_) {}
+    } catch (error) { if (error instanceof SessionExpiredError) throw error; }
 
     const payload = {
       kksj,
@@ -338,32 +369,26 @@ class ApiService {
     };
 
     try {
-      const res = await this.authenticatedRequest({
+      return await this.queryPages({
         url: "kscj/cjcx_list",
         method: "POST",
         data: payload,
-      });
-      requireDataPage(res.data, "grades");
-      return parseGradesHtml(res.data);
+      }, "grades", parseGradesHtml);
     } catch (error) {
       if (error instanceof SessionExpiredError) throw error;
       try {
-        const fallback = await this.authenticatedRequest({
+        return await this.queryPages({
           url: "kscj/cjcx_list",
           method: "GET",
           params: payload,
-        });
-        requireDataPage(fallback.data, "grades");
-        return parseGradesHtml(fallback.data);
+        }, "grades", parseGradesHtml);
       } catch (err2) {
         if (err2 instanceof SessionExpiredError) throw err2;
-        const minimal = await this.authenticatedRequest({
+        return await this.queryPages({
           url: "kscj/cjcx_list",
           method: "POST",
           data: { kksj, xsfs: "all", pageNum: 1, pageSize: 999 },
-        });
-        requireDataPage(minimal.data, "grades");
-        return parseGradesHtml(minimal.data);
+        }, "grades", parseGradesHtml);
       }
     }
   }
@@ -380,38 +405,25 @@ class ApiService {
       xqlb: "",
     };
 
-    try {
-      // 策略 1: POST 请求 xsks/xsksap_list
-      const res = await this.authenticatedRequest({
-        url: "xsks/xsksap_list",
-        method: "POST",
-        data: payload,
-      });
-
-      let parsed = parseExamsHtml(res.data);
-      if (parsed.length > 0) return parsed;
-
-      // 策略 2: GET 请求 xsks/xsksap_list
-      const getRes = await this.authenticatedRequest({
-        url: "xsks/xsksap_list",
-        method: "GET",
-        params: payload,
-      });
-      parsed = parseExamsHtml(getRes.data);
-      if (parsed.length > 0) return parsed;
-
-      // 策略 3: 备用 POST 请求 xsks/xsks_list
-      const altRes = await this.authenticatedRequest({
-        url: "xsks/xsks_list",
-        method: "POST",
-        data: { xnxqid: xnxqid || "", pageNum: 1, pageSize: 999 },
-      });
-      return parseExamsHtml(altRes.data);
-    } catch (e) {
-      if (e instanceof SessionExpiredError) throw e;
-      console.warn("获取考试异常:", e);
-      throw e;
+    const attempts = [
+      { url: "xsks/xsksap_list", method: "POST" as const, data: payload },
+      { url: "xsks/xsksap_list", method: "GET" as const, params: payload },
+      { url: "xsks/xsks_list", method: "POST" as const, data: payload },
+    ];
+    let lastError: unknown;
+    let validEmpty = false;
+    for (const request of attempts) {
+      try {
+        const parsed = await this.queryPages(request, "exams", parseExamsHtml);
+        if (parsed.length) return parsed;
+        validEmpty = true;
+      } catch (error) {
+        if (error instanceof SessionExpiredError) throw error;
+        lastError = error;
+      }
     }
+    if (validEmpty) return [];
+    throw lastError || new Error("考试查询失败，已保留缓存");
   }
 }
 

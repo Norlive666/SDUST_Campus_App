@@ -6,6 +6,8 @@ import { api } from "../services/api";
 import { readPersistedUser } from "../services/session-state";
 import { calculateCurrentTermAndWeek, StudentInfo } from "../services/parser";
 
+import { bindLegacyExamCache } from "../services/exam-cache";
+import { bindLegacyTimetable } from "../services/timetable-cache";
 import { mondayOf, weekFromAnchor } from "../services/teaching-week";
 
 export const useUserStore = defineStore("user", {
@@ -20,6 +22,8 @@ export const useUserStore = defineStore("user", {
       className: "",
       curTerm: initialTermAndWeek.term, // 动态推算当前学期 如 2026-2027-1
       curWeek: initialTermAndWeek.week,
+      automaticTerm: true,
+      calendarTerm: initialTermAndWeek.term,
       weekAnchor: null as { term: string; week: number; monday: string } | null,
       today: mondayOf(new Date(), false),
     };
@@ -28,7 +32,13 @@ export const useUserStore = defineStore("user", {
   actions: {
     init() {
       const saved = readPersistedUser();
-      if (saved) Object.assign(this, saved);
+      if (saved) {
+        Object.assign(this, saved);
+        if (!saved.calendarTerm) this.calendarTerm = saved.weekAnchor?.monday
+          ? calculateCurrentTermAndWeek(new Date(`${saved.weekAnchor.monday}T12:00:00`)).term : saved.curTerm;
+        bindLegacyTimetable(this.curTerm);
+        bindLegacyExamCache(this.curTerm);
+      }
       else this.$reset();
       this.syncCalendar();
     },
@@ -47,6 +57,8 @@ export const useUserStore = defineStore("user", {
             curTerm: this.curTerm,
             curWeek: this.curWeek,
             weekAnchor: this.weekAnchor,
+            automaticTerm: this.automaticTerm,
+            calendarTerm: this.calendarTerm,
           }),
         );
       } catch (_) {}
@@ -67,7 +79,13 @@ export const useUserStore = defineStore("user", {
           } catch (_) {}
         }
         if (previousAccount !== account) {
-          useTimetableStore().courses = [];
+          localStorage.removeItem("shst_timetable");
+          localStorage.removeItem("shst_timetable_term");
+          useTimetableStore().clear();
+          this.weekAnchor = null;
+          this.automaticTerm = true;
+          this.calendarTerm = "";
+          this.syncCalendar();
           localStorage.removeItem("shst_timetable");
           localStorage.removeItem("shst_grades");
           localStorage.removeItem("shst_exams");
@@ -98,7 +116,7 @@ export const useUserStore = defineStore("user", {
 
     async logout() {
       api.invalidateSession();
-      useTimetableStore().courses = [];
+      useTimetableStore().clear();
       this.isLoggedIn = false;
       this.account = "";
       this.name = "山科同学";
@@ -114,13 +132,20 @@ export const useUserStore = defineStore("user", {
 
     syncCalendar(now = new Date()) {
       const fallback = calculateCurrentTermAndWeek(now);
+      if (this.automaticTerm && fallback.term !== this.calendarTerm) {
+        this.curTerm = fallback.term;
+        this.weekAnchor = null;
+        this.curWeek = fallback.week;
+        useTimetableStore().resetForTerm();
+      }
+      this.calendarTerm = fallback.term;
       // 老版本只存周数，没有日期；用日期推算迁移，避免把过期的第七周当成今天。
       if (!this.weekAnchor || this.weekAnchor.term !== this.curTerm ||
           weekFromAnchor(this.weekAnchor, now) === null) {
         this.weekAnchor = {
           term: this.curTerm,
-          week: this.curTerm === fallback.term ? fallback.week : this.curWeek,
-          monday: mondayOf(now),
+          week: this.curTerm === fallback.term ? 1 : this.curWeek,
+          monday: this.curTerm === fallback.term ? fallback.startMonday : mondayOf(now),
         };
       }
       this.curWeek = weekFromAnchor(this.weekAnchor, now)!;
@@ -135,11 +160,23 @@ export const useUserStore = defineStore("user", {
       this.save();
     },
 
+    setAutomaticTerm(enabled: boolean) {
+      this.automaticTerm = enabled;
+      if (enabled) {
+        this.calendarTerm = "";
+        this.syncCalendar();
+      }
+      this.save();
+    },
     setCurTerm(term: string) {
-      if (this.curTerm === term) return;
+      if (!/^\d{4}-\d{4}-[12]$/.test(term)) return;
+      this.automaticTerm = false;
+      if (this.curTerm === term) { this.save(); return; }
       this.curTerm = term;
+      this.curWeek = 1;
       this.weekAnchor = null;
       this.syncCalendar();
+      useTimetableStore().resetForTerm();
     },
   },
 });

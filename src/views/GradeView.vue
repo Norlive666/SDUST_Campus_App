@@ -55,16 +55,17 @@
           <div class="stat-item">
             <strong
               >{{ passedCount
-              }}<small> / {{ filteredGrades.length }}</small></strong
+              }}<small> / {{ gradedCount }}</small></strong
             ><span>通过课程</span>
           </div>
           <div class="stat-item">
             <strong
-              :class="{ attention: filteredGrades.length > passedCount }"
-              >{{ filteredGrades.length - passedCount }}</strong
-            ><span>待通过课程</span>
+              :class="{ attention: failedCount > 0 }"
+              >{{ failedCount }}</strong
+            ><span>未通过课程</span>
           </div>
         </div>
+        <p v-if="unsettledCount" class="footnote">{{ unsettledCount }} 门待出分、免修/免考或状态待核实，未计入通过率与绩点</p>
       </section>
       <div class="section-heading">
         <h2>课程成绩</h2>
@@ -114,7 +115,7 @@
             <div class="course-meta">
               <span class="meta-tag">{{ g.type || "必修" }}</span
               ><span>{{ g.credit }} 学分</span
-              ><span v-if="g.score !== '缓考'">绩点 {{ g.gpa }}</span>
+              ><span v-if="['pass', 'fail'].includes(gradeStatus(g))">绩点 {{ g.gpa }}</span>
             </div>
             <div class="course-term">
               {{ g.term }}<span v-if="g.examType"> · {{ g.examType }}</span>
@@ -125,15 +126,15 @@
             <strong
               class="score-display"
               :class="{
-                'score-fail': !g.isPass && g.score !== '缓考',
-                'score-pending': g.score === '缓考',
+                'score-fail': gradeStatus(g) === 'fail',
+                'score-pending': !['pass', 'fail'].includes(gradeStatus(g)),
                 'score-word': g.score.length > 3,
               }"
               >{{ g.score }}</strong
             ><span
               class="score-status"
-              :class="g.score === '缓考' ? 'status-pending' : g.isPass ? 'status-pass' : 'status-fail'"
-              ><i></i>{{ g.score === '缓考' ? "缓考待考" : g.isPass ? "已通过" : "未通过" }}</span
+              :class="gradeStatus(g) === 'pass' ? 'status-pass' : gradeStatus(g) === 'fail' ? 'status-fail' : 'status-pending'"
+              ><i></i>{{ gradeStatusLabel(g) }}</span
             >
           </div>
         </article>
@@ -166,7 +167,7 @@
           重新查询
         </button>
       </div>
-      <p class="footnote">成绩以教务系统为准 · 下拉可同步最新记录</p>
+      <p class="footnote">成绩以教务系统为准 · 无官方绩点时按现有公式估算；重复考试记录逐条展示</p>
     </van-pull-refresh>
     <van-action-sheet
       v-model:show="showTermPicker"
@@ -185,6 +186,7 @@ import { SessionExpiredError } from "../services/response";
 import { readGradeCache, saveGradeCache } from "../services/grade-cache";
 import { api } from "../services/api";
 import { GradeItem } from "../services/parser";
+import { gradeStatus, gradeStatusLabel, numericScore } from "../services/grade-result";
 import PageHeader from "../components/PageHeader.vue";
 import SyncNotice from "../components/SyncNotice.vue";
 import { useUserStore } from "../stores/user";
@@ -204,22 +206,24 @@ const statusOptions = [
   { label: "已通过", value: "pass" as const },
   { label: "未通过", value: "fail" as const },
   { label: "补/缓考", value: "special" as const },
+  { label: "待出分", value: "pending" as const },
 ];
 const query = ref("");
-const statusFilter = ref<"all" | "pass" | "fail" | "special">("all");
+const statusFilter = ref<"all" | "pass" | "fail" | "special" | "pending">("all");
 const visibleGrades = computed(() =>
   filteredGrades.value.filter((g) => {
     const matchesQuery = g.name.toLowerCase().includes(query.value.trim().toLowerCase());
     if (!matchesQuery) return false;
 
     if (statusFilter.value === "all") return true;
-    if (statusFilter.value === "pass") return g.isPass && g.score !== "缓考";
-    if (statusFilter.value === "fail") return !g.isPass && g.score !== "缓考";
+    if (statusFilter.value === "pass") return gradeStatus(g) === "pass";
+    if (statusFilter.value === "fail") return gradeStatus(g) === "fail";
+    if (statusFilter.value === "pending") return gradeStatus(g) === "pending";
     if (statusFilter.value === "special") {
       return (
         g.score === "缓考" ||
         (g.examNature && (g.examNature.includes("缓考") || g.examNature.includes("补考") || g.examNature.includes("重修"))) ||
-        Boolean(g.makeupScore)
+        Boolean(g.makeupScore && g.makeupScore !== "0")
       );
     }
     return true;
@@ -267,55 +271,20 @@ const filteredGrades = computed(() => {
   );
 });
 
-const totalCredits = computed(() => {
-  const sum = filteredGrades.value.reduce(
-    (acc, cur) => {
-      if (cur.score === "缓考" || (cur.examNature?.includes("缓考") && isNaN(parseFloat(cur.score)))) {
-        return acc;
-      }
-      return acc + (cur.isPass ? cur.credit : 0);
-    },
-    0,
-  );
-  return sum.toFixed(1);
-});
-
-const passedCount = computed(() => {
-  return filteredGrades.value.filter((g) => {
-    if (g.score === "缓考" || (g.examNature?.includes("缓考") && isNaN(parseFloat(g.score)))) {
-      return false;
-    }
-    return g.isPass;
-  }).length;
-});
-
+const graded = computed(() => filteredGrades.value.filter(g => ["pass", "fail"].includes(gradeStatus(g))));
+const gradedCount = computed(() => graded.value.length);
+const unsettledCount = computed(() => filteredGrades.value.length - gradedCount.value);
+const passedCount = computed(() => filteredGrades.value.filter(g => gradeStatus(g) === "pass").length);
+const failedCount = computed(() => filteredGrades.value.filter(g => gradeStatus(g) === "fail").length);
+const totalCredits = computed(() => filteredGrades.value.reduce((sum, g) => sum + (gradeStatus(g) === "pass" ? g.credit : 0), 0).toFixed(1));
 const calculatedGpa = computed(() => {
-  let totalPoints = 0;
-  let totalCredit = 0;
-  for (const g of filteredGrades.value) {
-    if (g.score === "缓考" || (g.examNature?.includes("缓考") && isNaN(parseFloat(g.score)))) {
-      continue;
-    }
-    totalPoints += g.gpa * g.credit;
-    totalCredit += g.credit;
-  }
-  return totalCredit > 0 ? (totalPoints / totalCredit).toFixed(2) : "0.00";
+  const credits = graded.value.reduce((sum, g) => sum + g.credit, 0);
+  return credits > 0 ? (graded.value.reduce((sum, g) => sum + g.gpa * g.credit, 0) / credits).toFixed(2) : "—";
 });
-
 const calculatedAvgScore = computed(() => {
-  let totalWeightedScore = 0;
-  let totalCredit = 0;
-  for (const g of filteredGrades.value) {
-    if (g.score === "缓考" || (g.examNature?.includes("缓考") && isNaN(parseFloat(g.score)))) {
-      continue;
-    }
-    const scoreNum = parseFloat(g.score);
-    if (!isNaN(scoreNum)) {
-      totalWeightedScore += scoreNum * g.credit;
-      totalCredit += g.credit;
-    }
-  }
-  return totalCredit > 0 ? (totalWeightedScore / totalCredit).toFixed(1) : "-";
+  const numeric = graded.value.filter(g => numericScore(g.score) !== null);
+  const credits = numeric.reduce((sum, g) => sum + g.credit, 0);
+  return credits > 0 ? (numeric.reduce((sum, g) => sum + numericScore(g.score)! * g.credit, 0) / credits).toFixed(1) : "—";
 });
 
 const loadGrades = async (): Promise<boolean> => {

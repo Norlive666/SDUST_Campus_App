@@ -56,6 +56,7 @@ public class TimetableWidgetProvider extends AppWidgetProvider {
     private static void render(Context context, AppWidgetManager manager, int id) {
         WidgetSnapshot snapshot = WidgetSnapshot.read(context);
         Calendar now = Calendar.getInstance();
+        snapshot.hasCache = snapshot.hasCache && WidgetSchedule.cacheCurrent(snapshot.validFrom, snapshot.validUntil, now);
         int week = WidgetSchedule.week(snapshot.monday, snapshot.anchorWeek, now);
         RemoteViews view = new RemoteViews(context.getPackageName(), R.layout.widget_timetable);
         String date = new SimpleDateFormat("M月d日 EEEE", Locale.SIMPLIFIED_CHINESE).format(now.getTime());

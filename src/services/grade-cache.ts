@@ -1,13 +1,20 @@
+import { resolveGrade } from "./grade-result";
 import type { GradeItem } from "./parser";
 
+function normalize(rows: GradeItem[]): GradeItem[] {
+  return rows.filter(g => g && typeof g.name === "string" && typeof g.score === "string").map(g => ({
+    ...g, ...resolveGrade({ raw: g.score, remark: g.remark, nature: g.examNature, gpa: g.gpa }),
+    originalScore: g.originalScore,
+  }));
+}
 export function readGradeCache(term: string): GradeItem[] {
   try {
     const cache = JSON.parse(localStorage.getItem("shst_grades") || "{}");
     // Migrate the original all-semester array without losing offline access.
     if (Array.isArray(cache))
-      return term === "all" ? cache : cache.filter((g) => g.term === term);
+      return normalize(term === "all" ? cache : cache.filter((g) => g.term === term));
     const rows = cache.byTerm?.[term];
-    return Array.isArray(rows) ? rows : [];
+    return Array.isArray(rows) ? normalize(rows) : [];
   } catch (_) {
     return [];
   }

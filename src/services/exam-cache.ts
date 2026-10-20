@@ -1,5 +1,11 @@
 import type { ExamItem } from "./parser";
 
+export function bindLegacyExamCache(term: string) {
+  try {
+    const raw = JSON.parse(localStorage.getItem("shst_exams") || "null");
+    if (Array.isArray(raw)) localStorage.setItem("shst_exams", JSON.stringify({ version: 2, byTerm: { [term]: raw } }));
+  } catch (_) {}
+}
 export function readExamCache(term: string): ExamItem[] {
   try {
     const raw = localStorage.getItem("shst_exams");

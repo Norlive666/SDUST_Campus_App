@@ -47,9 +47,9 @@ onMounted(async () => {
   timetableStore.init();
   if (supportsNativeWidget()) {
     stopWidgetSync = watch(
-      () => [userStore.isLoggedIn, userStore.account, userStore.curTerm, userStore.weekAnchor, timetableStore.courses],
+      () => [userStore.isLoggedIn, userStore.account, userStore.curTerm, userStore.weekAnchor, timetableStore.courses, timetableStore.hasCache],
       () => {
-        const snapshot = makeWidgetSnapshot(userStore, timetableStore.courses, localStorage.getItem("shst_timetable") !== null);
+        const snapshot = makeWidgetSnapshot(userStore, timetableStore.courses, timetableStore.hasCache);
         void syncTimetableWidget(snapshot).then(() => initializeTimetableNotification()).catch(() => {});
       }, { deep: true, immediate: true },
     );

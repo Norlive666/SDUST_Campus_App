@@ -1,3 +1,6 @@
+import { mondayOf } from "./teaching-week";
+import { examTiming, type ExamTiming } from "./exam-time";
+import { resolveGrade, valueText, type GradeStatus } from "./grade-result";
 /**
  * 山科大强智教务 HTML 解析器 (SDUST HTML Parser)
  */
@@ -41,9 +44,14 @@ export interface GradeItem {
   examNature?: string; // 考试性质 (如 正常考试/补考/缓考/重修)
   makeupScore?: string; // 补考/缓考成绩
   remark?: string; // 成绩备注 (如 缓考/旷考/免修)
+  status?: GradeStatus;
+  originalScore?: string;
 }
 
 export interface ExamItem {
+  phase?: ExamTiming["phase"];
+  startsAt?: number;
+  endsAt?: number;
   name: string; // 考试科目
   time: string; // 考试时间
   location: string; // 考场教室 (如 J7-302)
@@ -131,7 +139,7 @@ export function formatClassroom(building: string, room: string): string {
 /**
  * 动态计算当天的自然教学学期与教学周（基于山科大学年校历推算）
  */
-export function calculateCurrentTermAndWeek(date = new Date()): { term: string; week: number } {
+export function calculateCurrentTermAndWeek(date = new Date()): { term: string; week: number; startMonday: string } {
   const year = date.getFullYear();
   const month = date.getMonth() + 1; // 1-12
   let term = '';
@@ -142,29 +150,28 @@ export function calculateCurrentTermAndWeek(date = new Date()): { term: string; 
     term = `${year}-${year + 1}-1`;
     const sept1 = new Date(year, 8, 1);
     const dayOfWeek = (sept1.getDay() + 6) % 7; // 0=Mon
-    termStartDate = new Date(sept1.getTime() - dayOfWeek * 86400000);
+    termStartDate = new Date(sept1);
+    termStartDate.setDate(sept1.getDate() - dayOfWeek);
   } else if (month <= 2) {
     // 跨年后的秋季学期末 (如 2027年1月仍属于 2026-2027-1)
     term = `${year - 1}-${year}-1`;
     const sept1 = new Date(year - 1, 8, 1);
     const dayOfWeek = (sept1.getDay() + 6) % 7;
-    termStartDate = new Date(sept1.getTime() - dayOfWeek * 86400000);
+    termStartDate = new Date(sept1);
+    termStartDate.setDate(sept1.getDate() - dayOfWeek);
   } else {
     // 春季学期 (如 2026-2027-2，通常2月下旬/3月初开学)
     term = `${year - 1}-${year}-2`;
     const march1 = new Date(year, 2, 1);
     const dayOfWeek = (march1.getDay() + 6) % 7;
-    termStartDate = new Date(march1.getTime() - dayOfWeek * 86400000);
+    termStartDate = new Date(march1);
+    termStartDate.setDate(march1.getDate() - dayOfWeek);
   }
 
-  const diffTime = date.getTime() - termStartDate.getTime();
-  const diffDays = Math.floor(diffTime / 86400000);
+  const calendarDay = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000;
+  const diffDays = calendarDay(date) - calendarDay(termStartDate);
   const week = diffDays >= 0 ? Math.floor(diffDays / 7) + 1 : 1;
-
-  return {
-    term,
-    week: Math.min(Math.max(week, 1), 22),
-  };
+  return { term, week: Math.min(Math.max(week, 1), 25), startMonday: mondayOf(termStartDate) };
 }
 
 /**
@@ -497,75 +504,52 @@ export function parseTimetableHtml(html: string): TimetableParseResult {
 /**
  * 解析 SDUST 成绩 JSON 数据结构
  */
+export function dataRows(json: any): any[] {
+  if (Array.isArray(json)) return json;
+  if (!json || typeof json !== "object") return [];
+  for (const key of ["rows", "items", "data", "list", "records"]) {
+    const value = json[key];
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") {
+      for (const nested of ["rows", "items", "list", "records"]) if (Array.isArray(value[nested])) return value[nested];
+    }
+  }
+  return [];
+}
+
 export function parseGradesJson(json: any): GradeItem[] {
-  const list = Array.isArray(json)
-    ? json
-    : Array.isArray(json?.data)
-    ? json.data
-    : Array.isArray(json?.items)
-    ? json.items
-    : Array.isArray(json?.rows)
-    ? json.rows
-    : [];
+  const list = dataRows(json);
 
   const grades: GradeItem[] = [];
   for (const item of list) {
     if (!item) continue;
-    const name = (item.kc_mc || item.kcmc || item.name || '').trim();
+    const name = valueText(item.kc_mc || item.kcmc || item.name);
     if (!name || name === '无' || name.includes('暂无成绩') || name.includes('暂无数据')) continue;
 
     const rawScore = String(item.zcj ?? item.cj ?? item.score ?? '').trim();
     const makeupScore = String(item.bkcj ?? item.cx_cj ?? item.cxcj ?? '').trim();
     const effectiveScore = String(item.zscj ?? item.yxcj ?? '').trim();
-    const remark = (item.cjbz || item.bz || item.tsyy || item.cjkc_bz || '').trim();
-    const examNature = (item.ksxz || item.cjxz || item.kslb || '').trim();
+    const remark = valueText(item.cjbzmc || item.cjbz || item.bz || item.tsyy || item.cjkc_bz);
+    const examNature = valueText(item.ksxzmc || item.ksxz || item.cjxz || item.kslb);
     let credit = parseFloat(item.xf ?? item.credit ?? '0') || 0;
     let gpa = parseFloat(item.jd ?? item.gpa ?? '0') || 0;
-    const code = (item.kch || item.code || '').trim();
-    const type = (item.kcsx || item.kcxz || item.type || '必修').trim();
-    const examType = (item.khfs || '考试').trim();
-    const term = (item.xnxq01id || item.kksj || item.xnxqid || item.term || '').trim();
+    const code = valueText(item.kch || item.code);
+    const type = valueText(item.kcsx || item.kcxz || item.type || '必修');
+    const examType = valueText(item.khfs || '考试');
+    const term = valueText(item.xnxq01id || item.kksj || item.xnxqid || item.term);
 
-    const isDeferred = examNature.includes('缓考') || remark.includes('缓考') || rawScore === '缓考';
-    const isMakeup = examNature.includes('补考') || remark.includes('补考') || (!!makeupScore && makeupScore !== '0');
-
-    let score = rawScore;
-    if (effectiveScore && !isNaN(parseFloat(effectiveScore))) {
-      score = effectiveScore;
-    } else if (makeupScore && !isNaN(parseFloat(makeupScore))) {
-      score = makeupScore;
-    } else if (isDeferred && (!score || score === '0' || score === '缓考')) {
-      score = '缓考';
-    } else if (!score) {
-      score = remark || '0';
-    }
-
-    const numScore = parseFloat(score);
-    let isPass = true;
-    if (score === '缓考' || (isDeferred && isNaN(numScore))) {
-      isPass = true; // 缓考未出分，不计入挂科
-      gpa = 0.0;
-    } else if (!isNaN(numScore)) {
-      isPass = numScore >= 60;
-      if (gpa === 0) {
-        gpa = numScore >= 60 ? parseFloat(((numScore - 60) / 10 + 1).toFixed(1)) : 0.0;
-      }
-    } else if (score === '优') { gpa = 4.5; isPass = true; }
-    else if (score === '良') { gpa = 3.5; isPass = true; }
-    else if (score === '中') { gpa = 2.5; isPass = true; }
-    else if (score === '及格') { gpa = 1.5; isPass = true; }
-    else if (score === '不及格' || score === '不合格') { gpa = 0.0; isPass = false; }
+    const result = resolveGrade({ raw: rawScore, makeup: makeupScore, effective: effectiveScore, remark, nature: examNature, gpa: item.jd ?? item.gpa });
+    const isDeferred = /缓考/.test(examNature + remark + rawScore);
+    const isMakeup = /补考/.test(examNature + remark) || (!!makeupScore && makeupScore !== '0');
 
     grades.push({
       term: term || '当前学期',
       code,
       name,
-      score,
-      credit: credit || 1.0,
-      gpa,
+      ...result,
+      credit: Number.isFinite(credit) && credit >= 0 ? credit : 0,
       type,
       examType,
-      isPass,
       examNature: examNature || (isDeferred ? '缓考' : isMakeup ? '补考' : undefined),
       makeupScore: makeupScore || undefined,
       remark: remark || undefined,
@@ -619,6 +603,7 @@ export function parseGradesHtml(html: any): GradeItem[] {
       examType: -1,
       examNature: -1,
       remark: -1,
+      marker: -1,
     };
 
     for (let r = 0; r < Math.min(rows.length, 3); r++) {
@@ -629,10 +614,13 @@ export function parseGradesHtml(html: any): GradeItem[] {
         if (text.includes('学期')) { colMap.term = idx; foundHeader = true; }
         else if (text.includes('课程编号') || text.includes('课程序号') || text.includes('课程代码')) { colMap.code = idx; foundHeader = true; }
         else if (text.includes('课程名称') || text.includes('课程名')) { colMap.name = idx; foundHeader = true; }
-        else if (text.includes('补考') || text.includes('重修成绩')) { colMap.makeupScore = idx; foundHeader = true; }
+        else if (text.includes('成绩标识') || text.includes('成绩标志')) { colMap.marker = idx; foundHeader = true; }
+        else if (text.includes('备注') || text.includes('原因')) { colMap.remark = idx; foundHeader = true; }
+        else if (/补考.*成绩|缓考.*成绩|重修.*成绩/.test(text)) { colMap.makeupScore = idx; foundHeader = true; }
         else if (text.includes('有效成绩') || text.includes('最终成绩')) { colMap.effectiveScore = idx; foundHeader = true; }
         else if (text.includes('考试性质') || text.includes('成绩性质') || text.includes('修读性质')) { colMap.examNature = idx; foundHeader = true; }
-        else if (text.includes('成绩') || text.includes('分数') || text.includes('总评')) {
+        else if (/总评|总成绩/.test(text) && !/绩点|学分/.test(text)) { colMap.score = idx; foundHeader = true; }
+        else if (/^(?:成绩|分数)$/.test(text) || (colMap.score === -1 && text.includes('成绩') && !/平时|期中|实验|标识|性质|方式/.test(text))) {
           if (!text.includes('标识') && !text.includes('性质') && !text.includes('方式') && colMap.score === -1) {
             colMap.score = idx;
             foundHeader = true;
@@ -671,7 +659,7 @@ export function parseGradesHtml(html: any): GradeItem[] {
       }
 
       const getColText = (colKey: string, fallbackIdx: number): string => {
-        const idx = colMap[colKey] !== -1 ? colMap[colKey] : fallbackIdx;
+        const idx = colMap[colKey] !== -1 ? colMap[colKey] : colMap.name !== -1 ? -1 : fallbackIdx;
         return tds[idx]?.textContent?.trim() || '';
       };
 
@@ -682,7 +670,7 @@ export function parseGradesHtml(html: any): GradeItem[] {
       const makeupScore = getColText('makeupScore', -1);
       const effectiveScore = getColText('effectiveScore', -1);
       const examNature = getColText('examNature', -1);
-      const remark = getColText('remark', -1);
+      const remark = [getColText('marker', -1), getColText('remark', -1)].filter(Boolean).join(' · ');
       let credit = parseFloat(getColText('credit', 6)) || 0;
       let gpa = parseFloat(getColText('gpa', 8)) || 0;
       const type = getColText('type', 10) || '必修';
@@ -690,59 +678,19 @@ export function parseGradesHtml(html: any): GradeItem[] {
 
       if (!name || name.includes('课程名称') || name.includes('序号') || name === '无') continue;
 
-      const isDeferred = examNature.includes('缓考') || remark.includes('缓考') || rawScore.includes('缓考');
-      const isMakeup = examNature.includes('补考') || remark.includes('补考') || (makeupScore !== '' && makeupScore !== '0');
-
-      let score = rawScore;
-      if (effectiveScore && !isNaN(parseFloat(effectiveScore))) {
-        score = effectiveScore;
-      } else if (makeupScore && !isNaN(parseFloat(makeupScore))) {
-        score = makeupScore;
-      } else if (isDeferred && (!score || score === '0' || score === '缓考')) {
-        score = '缓考';
-      } else if (!score || score === '0') {
-        if (remark) score = remark;
-        else score = '0';
-      }
-
-      // 如果未识别到学分，尝试在所有列中寻找合理的学分数值 (0.5 ~ 10.0)
-      if (credit === 0) {
-        for (let i = 4; i < tds.length; i++) {
-          const val = parseFloat(tds[i].textContent?.trim() || '0');
-          if (!isNaN(val) && val >= 0.5 && val <= 10.0 && val !== parseFloat(score)) {
-            credit = val;
-            break;
-          }
-        }
-      }
-
-      // 自动绩点换算（如教务系统未返回独立绩点列，按山科大标准 5 分制推算）
-      const numScore = parseFloat(score);
-      let isPass = true;
-      if (score === '缓考' || (isDeferred && isNaN(numScore))) {
-        isPass = true; // 缓考未出分，不计入挂科
-        gpa = 0.0;
-      } else if (!isNaN(numScore)) {
-        isPass = numScore >= 60;
-        if (gpa === 0) {
-          gpa = numScore >= 60 ? parseFloat(((numScore - 60) / 10 + 1).toFixed(1)) : 0.0;
-        }
-      } else if (score === '优') { gpa = 4.5; isPass = true; }
-      else if (score === '良') { gpa = 3.5; isPass = true; }
-      else if (score === '中') { gpa = 2.5; isPass = true; }
-      else if (score === '及格') { gpa = 1.5; isPass = true; }
-      else if (score === '不及格' || score === '不合格') { gpa = 0.0; isPass = false; }
+      const result = resolveGrade({ raw: rawScore, makeup: makeupScore, effective: effectiveScore, remark, nature: examNature,
+        gpa: getColText('gpa', 8) });
+      const isDeferred = /缓考/.test(examNature + remark + rawScore);
+      const isMakeup = /补考/.test(examNature + remark) || (!!makeupScore && makeupScore !== '0');
 
       grades.push({
         term: term || '当前学期',
         code,
         name,
-        score: score || '0',
-        credit: credit || 1.0,
-        gpa,
+        ...result,
+        credit: Number.isFinite(credit) && credit >= 0 ? credit : 0,
         type,
         examType,
-        isPass,
         examNature: examNature || (isDeferred ? '缓考' : isMakeup ? '补考' : undefined),
         makeupScore: makeupScore || undefined,
         remark: remark || undefined,
@@ -759,42 +707,29 @@ export function parseGradesHtml(html: any): GradeItem[] {
  * 解析 SDUST 考试日程 JSON 数据结构
  */
 export function parseExamsJson(json: any): ExamItem[] {
-  const list = Array.isArray(json)
-    ? json
-    : Array.isArray(json?.data)
-    ? json.data
-    : Array.isArray(json?.items)
-    ? json.items
-    : Array.isArray(json?.rows)
-    ? json.rows
-    : [];
+  const list = dataRows(json);
 
   const exams: ExamItem[] = [];
   const now = new Date().getTime();
 
   for (const item of list) {
     if (!item) continue;
-    const name = (item.kskcmc || item.kcmc || item.name || '').trim();
+    const name = valueText(item.kskcmc || item.kcmc || item.name);
     if (!name || name === '无' || name.includes('暂无考试') || name.includes('暂无数据')) continue;
 
     const rawLocation = item.js_mc || item.classroom || item.location || '';
     const location = rawLocation ? cleanSdustClassroom(rawLocation) : '暂未公布';
     const seat = String(item.zwh ?? item.seat ?? '-').trim() || '-';
-    const time = (item.kssj || item.time || '待排考').trim();
-
-    let daysLeft: number | undefined = undefined;
-    const dateMatch = time.match(/(\d{4}-\d{2}-\d{2})/);
-    if (dateMatch) {
-      const examDate = new Date(dateMatch[1]).getTime();
-      daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
-    }
+    const start = valueText(item.kssj || item.time || '待排考');
+    const end = valueText(item.jssj || item.kssj_js);
+    const time = end && !start.includes(end) ? `${start}–${end.match(/\d{1,2}:[0-5]\d/)?.[0] || end}` : start;
 
     exams.push({
       name,
       time,
       location,
       seat,
-      daysLeft,
+      ...examTiming(time),
     });
   }
   return exams;
@@ -821,57 +756,34 @@ export function parseExamsHtml(html: any): ExamItem[] {
   }
 
   const exams: ExamItem[] = [];
-  try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(trimmed, 'text/html');
-    const table = doc.querySelector('#dataList') || doc.querySelector('table');
-    if (!table) return exams;
-
-    const rows = table.querySelectorAll('tbody tr, tr');
-    const now = new Date().getTime();
-
-    rows.forEach((row) => {
-      const tds = row.querySelectorAll('td');
-      if (tds.length < 4) return;
-
-      const name = tds[3]?.textContent?.trim() || tds[2]?.textContent?.trim() || '';
-      if (!name || name.includes('课程名称') || name.includes('序号')) return;
-
-      let time = '';
-      let location = '';
-      let seat = '-';
-
-      for (let i = 1; i < tds.length; i++) {
-        const txt = tds[i].textContent?.trim() || '';
-        if (/\d{4}-\d{2}-\d{2}/.test(txt) || /\d{2}:\d{2}/.test(txt)) {
-          time = txt;
-        } else if (/[JjA-Za-z]\d+/.test(txt) || txt.includes('教学楼') || txt.includes('考场') || txt.includes('楼')) {
-          location = extractClassroomFromPlace(txt);
-        } else if (/^\d+$/.test(txt) && parseInt(txt, 10) > 0 && parseInt(txt, 10) < 150) {
-          seat = txt;
-        }
-      }
-
-      let daysLeft: number | undefined = undefined;
-      const dateMatch = time.match(/(\d{4}-\d{2}-\d{2})/);
-      if (dateMatch) {
-        const examDate = new Date(dateMatch[1]).getTime();
-        daysLeft = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
-      }
-
-      if (name) {
-        exams.push({
-          name,
-          time: time || '待教务排考',
-          location: location || '暂未公布',
-          seat,
-          daysLeft,
-        });
-      }
+  const doc = new DOMParser().parseFromString(trimmed, 'text/html');
+  const table = doc.querySelector('#dataList') || Array.from(doc.querySelectorAll('table')).find(t => /课程名/.test(t.textContent || '') && /考试时间|考试日期/.test(t.textContent || ''));
+  if (!table) return exams;
+  const rows = Array.from(table.querySelectorAll('tr'));
+  let header = -1;
+  const columns: Record<string, number> = {};
+  for (let i = 0; i < Math.min(rows.length, 4); i++) {
+    const cells = Array.from(rows[i].querySelectorAll('th,td'));
+    cells.forEach((cell, index) => {
+      const text = cell.textContent?.replace(/\s/g, '') || '';
+      if (/课程名|考试科目/.test(text)) columns.name = index;
+      else if (/结束时间/.test(text)) columns.end = index;
+      else if (/考试时间|开始时间|考试日期/.test(text)) columns.time = index;
+      else if (/考场|教室|地点/.test(text)) columns.location = index;
+      else if (/座位/.test(text)) columns.seat = index;
     });
-  } catch (e) {
-    console.error('考试安排解析异常:', e);
+    if (columns.name !== undefined) { header = i; break; }
   }
-
+  if (header < 0) return exams;
+  for (const row of rows.slice(header + 1)) {
+    const cells = row.querySelectorAll('td');
+    const get = (key: string) => columns[key] === undefined ? '' : cells[columns[key]]?.textContent?.trim() || '';
+    const name = get('name');
+    if (!name || /暂无|无考试|未查询到|没有找到/.test(name)) continue;
+    const start = get('time');
+    const end = get('end');
+    const time = end ? `${start}–${end.match(/\d{1,2}:[0-5]\d/)?.[0] || end}` : start || '待教务排考';
+    exams.push({ name, time, location: get('location') ? cleanSdustClassroom(get('location')) : '暂未公布', seat: get('seat') || '-', ...examTiming(time) });
+  }
   return exams;
 }

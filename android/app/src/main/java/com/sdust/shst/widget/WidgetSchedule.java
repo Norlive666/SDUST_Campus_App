@@ -42,6 +42,27 @@ public final class WidgetSchedule {
             return (int) Math.max(1, Math.min(25, anchorWeek + elapsed));
         } catch (RuntimeException e) { return 0; }
     }
+    public static boolean cacheCurrent(String until, Calendar now) {
+        if (until == null || until.isEmpty()) return true; // legacy snapshots
+        try {
+            if (!until.matches("\\d{4}-\\d{2}-\\d{2}")) return false;
+            String[] parts = until.split("-");
+            long end = dayNumber(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+            long today = dayNumber(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH));
+            return today < end;
+        } catch (RuntimeException e) { return false; }
+    }
+    public static boolean cacheCurrent(String from, String until, Calendar now) {
+        if (!cacheCurrent(until, now)) return false;
+        if (from == null || from.isEmpty()) return true;
+        try {
+            if (!from.matches("\\d{4}-\\d{2}-\\d{2}")) return false;
+            String[] parts = from.split("-");
+            long start = dayNumber(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]), Integer.parseInt(parts[2]));
+            long today = dayNumber(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH));
+            return today >= start;
+        } catch (RuntimeException e) { return false; }
+    }
     public static List<Course> today(List<Course> courses, int week, Calendar now) {
         int day = (now.get(Calendar.DAY_OF_WEEK) + 5) % 7;
         List<Course> result = new ArrayList<>();

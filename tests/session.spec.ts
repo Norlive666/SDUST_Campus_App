@@ -37,6 +37,7 @@ test.beforeEach(async ({ page }) => {
           account: "student",
           curWeek: 6,
           curTerm: "2024-2025-1",
+          automaticTerm: false, // These tests intentionally browse a historical semester.
           isMockMode: false,
         }),
       );

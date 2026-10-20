@@ -382,17 +382,19 @@ const weekDateList = computed(() => {
     now.getMonth(),
     now.getDate() - currentDayOfWeek,
   );
-  const weekDiff = timetableStore.selectedWeek - userStore.curWeek;
-  const targetMonday = new Date(thisMonday.getTime() + weekDiff * 7 * 86400000);
+  const anchor = userStore.weekAnchor;
+  const weekDiff = timetableStore.selectedWeek - (anchor?.week ?? userStore.curWeek);
+  const targetMonday = anchor ? new Date(`${anchor.monday}T12:00:00`) : new Date(thisMonday);
+  targetMonday.setDate(targetMonday.getDate() + weekDiff * 7);
 
   return weekDayLabels.map((name, idx) => {
-    const d = new Date(targetMonday.getTime() + idx * 86400000);
+    const d = new Date(targetMonday);
+    d.setDate(d.getDate() + idx);
     const m = d.getMonth() + 1;
     const day = d.getDate();
     const dateStr = `${m}/${day < 10 ? "0" + day : day}`;
     const isToday =
-      timetableStore.selectedWeek === userStore.curWeek &&
-      idx === currentDayOfWeek;
+      d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
     return {
       name,
       index: idx,
@@ -558,6 +560,10 @@ const onRefresh = async () => {
   }
 };
 
+watch(() => userStore.curTerm, () => {
+  timetableStore.selectedWeek = userStore.curWeek;
+  if (userStore.isLoggedIn) void onRefresh();
+});
 onMounted(() => {
   userStore.init();
   timetableStore.init();

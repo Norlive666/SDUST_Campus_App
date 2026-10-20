@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { CourseItem } from '../services/parser';
 import { api } from '../services/api';
 import { useUserStore } from './user';
+import { readTimetableCache, timetableTermKey } from '../services/timetable-cache';
 
 const COLOR_PALETTE = [
   '#ff914d', // 活力橙 (如 概率论)
@@ -32,6 +33,8 @@ export const useTimetableStore = defineStore('timetable', {
     courses: [] as CourseItem[],
     selectedWeek: useUserStore().curWeek,
     isLoading: false,
+    hasCache: false,
+    requestId: 0,
   }),
 
   getters: {
@@ -68,7 +71,7 @@ export const useTimetableStore = defineStore('timetable', {
     },
 
     todayCourses: (state) => {
-      const today = (new Date().getDay() + 6) % 7;
+      const today = (new Date(`${useUserStore().today}T12:00:00`).getDay() + 6) % 7;
       return state.courses
         .filter((c) => c.day === today && c.weeks.includes(state.selectedWeek))
         .sort((a, b) => a.section - b.section);
@@ -77,30 +80,46 @@ export const useTimetableStore = defineStore('timetable', {
 
   actions: {
     init() {
-      try {
-        const saved = localStorage.getItem('shst_timetable');
-        if (saved) {
-          this.courses = JSON.parse(saved);
-        }
-      } catch (_) {}
+      const cached = readTimetableCache(useUserStore().curTerm);
+      this.courses = cached || [];
+      this.hasCache = cached !== null;
     },
-
+    resetForTerm() {
+      this.requestId++;
+      this.isLoading = false;
+      this.init();
+      this.selectedWeek = useUserStore().curWeek;
+    },
+    clear() {
+      this.requestId++;
+      this.isLoading = false;
+      this.courses = [];
+      this.hasCache = false;
+    },
     save() {
       try {
         localStorage.setItem('shst_timetable', JSON.stringify(this.courses));
+        localStorage.setItem(timetableTermKey, useUserStore().curTerm);
+        this.hasCache = true;
       } catch (_) {}
     },
 
     async fetchTimetable(term: string = '') {
-      this.isLoading = true;
       const userStore = useUserStore();
+      userStore.syncCalendar();
+      const requestedTerm = term || userStore.curTerm;
+      const requestId = ++this.requestId;
+      const account = userStore.account;
+      this.isLoading = true;
       try {
-        const result = await api.getTimetable(term);
+        const result = await api.getTimetable(requestedTerm);
+        userStore.syncCalendar();
+        if (requestId !== this.requestId || userStore.curTerm !== requestedTerm || !userStore.isLoggedIn || userStore.account !== account) return;
 
         // 同步服务端学期；教学周由日期与本地校准基准计算
-        if (result.currentTerm) {
-          userStore.setCurTerm(result.currentTerm);
-        }
+        // This response's selected semester is a query filter, not a live calendar.
+        if (result.currentTerm && result.currentTerm !== requestedTerm)
+          throw new Error("教务返回的课表学期与查询不符，已保留当前学期数据");
         // 教务页 zc 下拉框是查询条件，不能用它覆盖按日期计算的教学周。
         const followedCurrentWeek = this.selectedWeek === userStore.curWeek;
         userStore.syncCalendar();
@@ -117,7 +136,7 @@ export const useTimetableStore = defineStore('timetable', {
         }));
         this.save();
       } finally {
-        this.isLoading = false;
+        if (requestId === this.requestId) this.isLoading = false;
       }
     },
   },

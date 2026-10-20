@@ -54,7 +54,7 @@
           <span
             ><van-icon aria-hidden="true" name="location-o" />
             {{ nearestExam.location || "考场待确认" }}</span
-          ><span v-if="nearestExam.seat">座位 {{ nearestExam.seat }} 号</span>
+          ><span v-if="nearestExam.seat && nearestExam.seat !== '-'">座位 {{ nearestExam.seat }} 号</span>
         </div>
       </section>
       <section
@@ -93,7 +93,7 @@
           v-for="(exam, index) in visibleExams"
           :key="exam.name + exam.time + index"
           class="exam-card"
-          :class="{ past: exam.daysLeft !== undefined && exam.daysLeft < 0 }"
+          :class="{ past: exam.phase === 'ended' }"
         >
           <div class="exam-card-header">
             <span class="exam-symbol"
@@ -123,8 +123,8 @@
             <div class="exam-seat">
               <span>座位号</span
               ><strong
-                >{{ exam.seat || "—"
-                }}<small v-if="exam.seat">号</small></strong
+                >{{ (exam.seat && exam.seat !== '-') ? exam.seat : "—"
+                }}<small v-if="exam.seat && exam.seat !== '-'">号</small></strong
               >
             </div>
           </div>
@@ -158,7 +158,7 @@
           重新查询
         </button>
       </div>
-      <p class="footnote">考试安排以教务系统最新通知为准</p>
+      <p class="footnote">考试安排以教务系统最新通知为准 · 已结束不代表成绩已通过</p>
     </van-pull-refresh>
     <van-action-sheet
       v-model:show="showTermPicker"
@@ -171,18 +171,26 @@
   </main>
 </template>
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { showToast } from "vant";
 import { SessionExpiredError } from "../services/response";
 import { readExamCache, saveExamCache } from "../services/exam-cache";
 import { api } from "../services/api";
 import { ExamItem } from "../services/parser";
+import { examTiming } from "../services/exam-time";
 import PageHeader from "../components/PageHeader.vue";
 import SyncNotice from "../components/SyncNotice.vue";
 import { useUserStore } from "../stores/user";
 
 const userStore = useUserStore();
-const exams = ref<ExamItem[]>([]);
+const rawExams = ref<ExamItem[]>([]);
+const now = ref(new Date());
+const updateTime = () => { now.value = new Date(); };
+const clock = setInterval(updateTime, 30_000);
+window.addEventListener("focus", updateTime);
+document.addEventListener("visibilitychange", updateTime);
+const exams = computed(() => rawExams.value.map(e => ({ ...e, ...examTiming(e.time, now.value) })));
+onUnmounted(() => { clearInterval(clock); window.removeEventListener("focus", updateTime); document.removeEventListener("visibilitychange", updateTime); requestId++; });
 const refreshing = ref(false);
 const loading = ref(false);
 const showTermPicker = ref(false);
@@ -225,8 +233,8 @@ const examFilters = [
 ];
 const upcomingExams = computed(() =>
   exams.value
-    .filter((e) => e.daysLeft === undefined || e.daysLeft >= 0)
-    .sort((a, b) => (a.daysLeft ?? Infinity) - (b.daysLeft ?? Infinity)),
+    .filter((e) => e.phase !== "ended")
+    .sort((a, b) => (a.startsAt ?? Infinity) - (b.startsAt ?? Infinity)),
 );
 const nearestExam = computed(
   () => upcomingExams.value.find((e) => e.daysLeft !== undefined) || null,
@@ -236,12 +244,12 @@ const visibleExams = computed(() =>
     (e) =>
       examFilter.value === "all" ||
       (examFilter.value === "upcoming"
-        ? e.daysLeft === undefined || e.daysLeft >= 0
-        : e.daysLeft !== undefined && e.daysLeft < 0),
+        ? e.phase !== "ended"
+        : e.phase === "ended"),
   ),
 );
 const statusText = (exam: ExamItem) =>
-  exam.daysLeft === undefined
+  exam.phase === "ongoing" ? "考试进行中" : exam.phase === "ended" ? "已结束" : exam.daysLeft === undefined
     ? "时间待确认"
     : exam.daysLeft < 0
       ? "已结束"
@@ -259,7 +267,7 @@ const loadExams = async (): Promise<boolean> => {
     const data = await api.getExams(term === "all" ? "" : term);
     saveExamCache(term, data);
     if (id !== requestId) return false;
-    exams.value = data;
+    rawExams.value = data;
     return true;
   } catch (error) {
     if (id === requestId) {
@@ -276,11 +284,12 @@ const loadExams = async (): Promise<boolean> => {
 
 const onSelectTerm = (action: { value: string }) => {
   selectedTerm.value = action.value;
-  exams.value = readExamCache(action.value);
+  rawExams.value = readExamCache(action.value);
   loadExams();
 };
 
 const onRefresh = async () => {
+  updateTime();
   try {
     if (await loadExams()) {
       showToast({ type: "success", message: "考试安排已更新" });
@@ -290,10 +299,15 @@ const onRefresh = async () => {
   }
 };
 
+watch(() => userStore.curTerm, (term, previous) => {
+  if (selectedTerm.value === previous) {
+    selectedTerm.value = term; rawExams.value = readExamCache(term); void loadExams();
+  }
+});
 onMounted(() => {
   userStore.init();
   selectedTerm.value = userStore.curTerm || "all";
-  exams.value = readExamCache(selectedTerm.value);
+  rawExams.value = readExamCache(selectedTerm.value);
   loadExams();
 });
 </script>

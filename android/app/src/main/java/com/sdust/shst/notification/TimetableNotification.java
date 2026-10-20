@@ -49,6 +49,7 @@ public final class TimetableNotification {
         NotificationManagerCompat manager = NotificationManagerCompat.from(context);
         WidgetSnapshot snapshot = WidgetSnapshot.read(context);
         Calendar now = Calendar.getInstance();
+        snapshot.hasCache = snapshot.hasCache && WidgetSchedule.cacheCurrent(snapshot.validFrom, snapshot.validUntil, now);
         int week = WidgetSchedule.week(snapshot.monday, snapshot.anchorWeek, now);
         if (!enabled(context) || !snapshot.loggedIn || !snapshot.hasCache || week == 0 || !allowed(context)) {
             manager.cancel(ID);

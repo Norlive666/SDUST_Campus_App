@@ -47,6 +47,13 @@ public class WidgetScheduleCheck {
         WidgetSchedule.Course noRoom = new WidgetSchedule.Course("未排教室", "", 0, 0, Arrays.asList(8));
         equal(new NotificationContent(Arrays.asList(noRoom), 420).subtitle.endsWith("教室待定"), true);
         equal(new NotificationContent(java.util.Collections.nCopies(15, morning), 420).expanded.contains("还有更多课程"), true);
+        equal(WidgetSchedule.cacheCurrent("2027-03-01", date("Asia/Shanghai", 2027, 2, 28)), true);
+        equal(WidgetSchedule.cacheCurrent("2027-03-01", date("Asia/Shanghai", 2027, 3, 1)), false);
+        equal(WidgetSchedule.cacheCurrent("2027-08-01", date("Asia/Shanghai", 2028, 1, 1)), false);
+        equal(WidgetSchedule.cacheCurrent("2027-02-30", date("Asia/Shanghai", 2027, 2, 28)), false);
+        equal(WidgetSchedule.cacheCurrent("2026-08-31", "2027-02-22", date("Asia/Shanghai", 2026, 8, 1)), false);
+        equal(WidgetSchedule.cacheCurrent("2026-08-31", "2027-02-22", date("Asia/Shanghai", 2026, 12, 31)), true);
+        equal(WidgetSchedule.cacheCurrent("2026-08-31", "2027-02-22", date("Asia/Shanghai", 2027, 2, 22)), false);
         System.out.println("Widget schedule: " + checks + " checks passed");
     }
 }

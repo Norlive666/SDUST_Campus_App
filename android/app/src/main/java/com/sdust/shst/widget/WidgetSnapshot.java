@@ -10,6 +10,8 @@ import org.json.JSONObject;
 public final class WidgetSnapshot {
     private static final String PREFS = "sdust_widget";
     public boolean loggedIn, hasCache;
+    public String validFrom = "";
+    public String validUntil = "";
     public String monday = "";
     public int anchorWeek;
     public final List<WidgetSchedule.Course> courses = new ArrayList<>();
@@ -19,6 +21,8 @@ public final class WidgetSnapshot {
         WidgetSnapshot result = new WidgetSnapshot();
         try {
             JSONObject data = new JSONObject(source);
+            result.validFrom = data.optString("validFrom", "");
+            result.validUntil = data.optString("validUntil", "");
             result.loggedIn = data.optBoolean("loggedIn", false);
             result.hasCache = result.loggedIn && data.optBoolean("hasCache", false);
             JSONObject anchor = data.optJSONObject("weekAnchor");
