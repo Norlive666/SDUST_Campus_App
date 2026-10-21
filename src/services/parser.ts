@@ -1,6 +1,6 @@
 import { mondayOf } from "./teaching-week";
 import { examTiming, type ExamTiming } from "./exam-time";
-import { resolveGrade, valueText, type GradeStatus } from "./grade-result";
+import { resolveGrade, valueText, joinGradeText, pickGradeResult, gradeExamNature, type GradeStatus } from "./grade-result";
 /**
  * 山科大强智教务 HTML 解析器 (SDUST HTML Parser)
  */
@@ -43,6 +43,10 @@ export interface GradeItem {
   isPass: boolean; // 是否通过
   examNature?: string; // 考试性质 (如 正常考试/补考/缓考/重修)
   makeupScore?: string; // 补考/缓考成绩
+  deferredScore?: string;
+  retakeScore?: string;
+  effectiveScore?: string;
+  unresolvedStatus?: boolean; // 数字状态码缺少对应名称，不能猜测缓考/缺考含义
   remark?: string; // 成绩备注 (如 缓考/旷考/免修)
   status?: GradeStatus;
   originalScore?: string;
@@ -517,6 +521,22 @@ export function dataRows(json: any): any[] {
   return [];
 }
 
+// Read semantic hints alongside the number, without executing returned markup.
+// Only grade-related cells/fields use this: a course name is not status evidence.
+function gradeCellEvidence(cell: Element | undefined | null): string {
+  if (!cell) return "";
+  const hints = [cell, ...Array.from(cell.querySelectorAll('[title], [aria-label], [data-cjbz], [data-ksxz]'))]
+    .flatMap(node => ['title', 'aria-label', 'data-cjbz', 'data-ksxz'].map(attr => node.getAttribute(attr)));
+  return joinGradeText(...hints.filter(hint => /缓考|补考|重修|缺考|旷考|作弊|违纪|免考|免修|待出分|未出分|未录入|待录入|未公布/.test(hint || '')));
+}
+
+function gradeField(value: unknown): { text: string; hint: string } {
+  const raw = valueText(value);
+  if (!/<[a-z][\s\S]*>/i.test(raw)) return { text: raw, hint: "" };
+  const body = new DOMParser().parseFromString(raw, 'text/html').body;
+  return { text: body.textContent?.trim() || "", hint: gradeCellEvidence(body) };
+}
+
 export function parseGradesJson(json: any): GradeItem[] {
   const list = dataRows(json);
 
@@ -526,11 +546,21 @@ export function parseGradesJson(json: any): GradeItem[] {
     const name = valueText(item.kc_mc || item.kcmc || item.name);
     if (!name || name === '无' || name.includes('暂无成绩') || name.includes('暂无数据')) continue;
 
-    const rawScore = String(item.zcj ?? item.cj ?? item.score ?? '').trim();
-    const makeupScore = String(item.bkcj ?? item.cx_cj ?? item.cxcj ?? '').trim();
-    const effectiveScore = String(item.zscj ?? item.yxcj ?? '').trim();
-    const remark = valueText(item.cjbzmc || item.cjbz || item.bz || item.tsyy || item.cjkc_bz);
-    const examNature = valueText(item.ksxzmc || item.ksxz || item.cjxz || item.kslb);
+    const raw = gradeField(item.zcj ?? item.cj ?? item.score);
+    const rawScore = raw.text;
+    const makeup = [item.bkcj].map(gradeField);
+    const deferred = [item.hkcj].map(gradeField);
+    const retake = [item.cx_cj, item.cxcj].map(gradeField);
+    const effective = [item.zscj, item.yxcj].map(gradeField);
+    const makeupScore = pickGradeResult(...makeup.map(field => field.text));
+    const deferredScore = pickGradeResult(...deferred.map(field => field.text));
+    const retakeScore = pickGradeResult(...retake.map(field => field.text));
+    const effectiveScore = pickGradeResult(...effective.map(field => field.text));
+    const remark = joinGradeText(item.cjbzmc, item.cjbz, item.bz, item.tsyy, item.cjkc_bz,
+      raw.hint, ...[...makeup, ...deferred, ...retake, ...effective].map(field => field.hint));
+    const examNature = joinGradeText(item.ksxzmc, item.ksxz, item.cjxz, item.kslb);
+    const unresolvedStatus = [[item.cjbzmc, item.cjbz], [item.ksxzmc, item.ksxz], ['', item.cjxz], ['', item.kslb]]
+      .some(([label, code]) => !valueText(label) && /^\d+$/.test(valueText(code)));
     let credit = parseFloat(item.xf ?? item.credit ?? '0') || 0;
     let gpa = parseFloat(item.jd ?? item.gpa ?? '0') || 0;
     const code = valueText(item.kch || item.code);
@@ -538,9 +568,9 @@ export function parseGradesJson(json: any): GradeItem[] {
     const examType = valueText(item.khfs || '考试');
     const term = valueText(item.xnxq01id || item.kksj || item.xnxqid || item.term);
 
-    const result = resolveGrade({ raw: rawScore, makeup: makeupScore, effective: effectiveScore, remark, nature: examNature, gpa: item.jd ?? item.gpa });
-    const isDeferred = /缓考/.test(examNature + remark + rawScore);
-    const isMakeup = /补考/.test(examNature + remark) || (!!makeupScore && makeupScore !== '0');
+    const result = resolveGrade({ raw: rawScore, makeup: makeupScore, deferred: deferredScore, retake: retakeScore,
+      effective: effectiveScore, remark, nature: examNature, unresolvedStatus, gpa: item.jd ?? item.gpa });
+    const extraNature = (score: string, label: string) => score && !/^0(?:\.0+)?$/.test(score) ? label : '';
 
     grades.push({
       term: term || '当前学期',
@@ -550,8 +580,13 @@ export function parseGradesJson(json: any): GradeItem[] {
       credit: Number.isFinite(credit) && credit >= 0 ? credit : 0,
       type,
       examType,
-      examNature: examNature || (isDeferred ? '缓考' : isMakeup ? '补考' : undefined),
+      examNature: gradeExamNature(examNature, remark, rawScore,
+        extraNature(retakeScore, '重修'), extraNature(makeupScore, '补考'), extraNature(deferredScore, '缓考')),
       makeupScore: makeupScore || undefined,
+      deferredScore: deferredScore || undefined,
+      retakeScore: retakeScore || undefined,
+      effectiveScore: effectiveScore || undefined,
+      unresolvedStatus,
       remark: remark || undefined,
     });
   }
@@ -596,6 +631,8 @@ export function parseGradesHtml(html: any): GradeItem[] {
       name: -1,
       score: -1,
       makeupScore: -1,
+      deferredScore: -1,
+      retakeScore: -1,
       effectiveScore: -1,
       credit: -1,
       gpa: -1,
@@ -606,17 +643,21 @@ export function parseGradesHtml(html: any): GradeItem[] {
       marker: -1,
     };
 
+    const extraCols: Record<string, number[]> = { makeupScore: [], deferredScore: [], retakeScore: [] };
     for (let r = 0; r < Math.min(rows.length, 3); r++) {
       const ths = rows[r].querySelectorAll('th, td');
       let foundHeader = false;
       ths.forEach((th, idx) => {
-        const text = th.textContent?.trim() || '';
+        const text = th.textContent?.replace(/\s+/g, '') || '';
         if (text.includes('学期')) { colMap.term = idx; foundHeader = true; }
         else if (text.includes('课程编号') || text.includes('课程序号') || text.includes('课程代码')) { colMap.code = idx; foundHeader = true; }
         else if (text.includes('课程名称') || text.includes('课程名')) { colMap.name = idx; foundHeader = true; }
-        else if (text.includes('成绩标识') || text.includes('成绩标志')) { colMap.marker = idx; foundHeader = true; }
+        else if (/成绩标识|成绩标志|成绩标记|成绩状态/.test(text)) { colMap.marker = idx; foundHeader = true; }
         else if (text.includes('备注') || text.includes('原因')) { colMap.remark = idx; foundHeader = true; }
-        else if (/补考.*成绩|缓考.*成绩|重修.*成绩/.test(text)) { colMap.makeupScore = idx; foundHeader = true; }
+        else if (/补考.*成绩|缓考.*成绩|重修.*成绩/.test(text)) {
+          const key = text.includes('补考') ? 'makeupScore' : text.includes('缓考') ? 'deferredScore' : 'retakeScore';
+          extraCols[key].push(idx); colMap[key] = idx; foundHeader = true;
+        }
         else if (text.includes('有效成绩') || text.includes('最终成绩')) { colMap.effectiveScore = idx; foundHeader = true; }
         else if (text.includes('考试性质') || text.includes('成绩性质') || text.includes('修读性质')) { colMap.examNature = idx; foundHeader = true; }
         else if (/总评|总成绩/.test(text) && !/绩点|学分/.test(text)) { colMap.score = idx; foundHeader = true; }
@@ -667,10 +708,17 @@ export function parseGradesHtml(html: any): GradeItem[] {
       const code = getColText('code', 2);
       const name = getColText('name', 3);
       const rawScore = getColText('score', 4);
-      const makeupScore = getColText('makeupScore', -1);
+      const extraScore = (key: string) => pickGradeResult(...extraCols[key].map(idx => tds[idx]?.textContent?.trim()));
+      const makeupScore = extraScore('makeupScore');
+      const deferredScore = extraScore('deferredScore');
+      const retakeScore = extraScore('retakeScore');
       const effectiveScore = getColText('effectiveScore', -1);
-      const examNature = getColText('examNature', -1);
-      const remark = [getColText('marker', -1), getColText('remark', -1)].filter(Boolean).join(' · ');
+      const examNature = joinGradeText(getColText('examNature', -1), gradeCellEvidence(tds[colMap.examNature]));
+      const remark = joinGradeText(getColText('marker', -1), getColText('remark', -1),
+        ...['score', 'marker', 'remark', 'effectiveScore', 'makeupScore', 'deferredScore', 'retakeScore']
+          .map(key => gradeCellEvidence(tds[colMap[key]])));
+      const unresolvedStatus = [getColText('marker', -1), getColText('examNature', -1)]
+        .some(text => /^\d+$/.test(text));
       let credit = parseFloat(getColText('credit', 6)) || 0;
       let gpa = parseFloat(getColText('gpa', 8)) || 0;
       const type = getColText('type', 10) || '必修';
@@ -678,10 +726,10 @@ export function parseGradesHtml(html: any): GradeItem[] {
 
       if (!name || name.includes('课程名称') || name.includes('序号') || name === '无') continue;
 
-      const result = resolveGrade({ raw: rawScore, makeup: makeupScore, effective: effectiveScore, remark, nature: examNature,
+      const result = resolveGrade({ raw: rawScore, makeup: makeupScore, deferred: deferredScore, retake: retakeScore,
+        effective: effectiveScore, remark, nature: examNature, unresolvedStatus,
         gpa: getColText('gpa', 8) });
-      const isDeferred = /缓考/.test(examNature + remark + rawScore);
-      const isMakeup = /补考/.test(examNature + remark) || (!!makeupScore && makeupScore !== '0');
+      const extraNature = (score: string, label: string) => score && !/^0(?:\.0+)?$/.test(score) ? label : '';
 
       grades.push({
         term: term || '当前学期',
@@ -691,8 +739,13 @@ export function parseGradesHtml(html: any): GradeItem[] {
         credit: Number.isFinite(credit) && credit >= 0 ? credit : 0,
         type,
         examType,
-        examNature: examNature || (isDeferred ? '缓考' : isMakeup ? '补考' : undefined),
+        examNature: gradeExamNature(examNature, remark, rawScore,
+          extraNature(retakeScore, '重修'), extraNature(makeupScore, '补考'), extraNature(deferredScore, '缓考')),
         makeupScore: makeupScore || undefined,
+        deferredScore: deferredScore || undefined,
+        retakeScore: retakeScore || undefined,
+        effectiveScore: effectiveScore || undefined,
+        unresolvedStatus,
         remark: remark || undefined,
       });
     }

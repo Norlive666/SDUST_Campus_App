@@ -186,7 +186,7 @@ import { SessionExpiredError } from "../services/response";
 import { readGradeCache, saveGradeCache } from "../services/grade-cache";
 import { api } from "../services/api";
 import { GradeItem } from "../services/parser";
-import { gradeStatus, gradeStatusLabel, numericScore } from "../services/grade-result";
+import { gradeStatus, gradeStatusLabel, isSpecialGrade, numericScore } from "../services/grade-result";
 import PageHeader from "../components/PageHeader.vue";
 import SyncNotice from "../components/SyncNotice.vue";
 import { useUserStore } from "../stores/user";
@@ -220,11 +220,7 @@ const visibleGrades = computed(() =>
     if (statusFilter.value === "fail") return gradeStatus(g) === "fail";
     if (statusFilter.value === "pending") return gradeStatus(g) === "pending";
     if (statusFilter.value === "special") {
-      return (
-        g.score === "缓考" ||
-        (g.examNature && (g.examNature.includes("缓考") || g.examNature.includes("补考") || g.examNature.includes("重修"))) ||
-        Boolean(g.makeupScore && g.makeupScore !== "0")
-      );
+      return isSpecialGrade(g);
     }
     return true;
   }),
