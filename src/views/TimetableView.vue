@@ -73,6 +73,7 @@
         ><van-icon :name="showWeekend ? 'arrow-left' : 'arrow'" />
       </button>
       <span v-else class="schedule-count">{{ dayCourses.length }} 门课程</span>
+      <a v-if="isWeb" href="/remote-control.html" class="remote-link">遥控器</a>
     </div>
 
     <div v-if="syncError" class="sync-error" role="status">
@@ -333,6 +334,7 @@
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
+import { Capacitor } from "@capacitor/core";
 import { SessionExpiredError } from "../services/response";
 import { showToast } from "vant";
 import { useTimetableStore } from "../stores/timetable";
@@ -341,6 +343,7 @@ import { CourseItem } from "../services/parser";
 
 const timetableStore = useTimetableStore();
 const userStore = useUserStore();
+const isWeb = !Capacitor.isNativePlatform();
 
 const showWeekPicker = ref(false);
 const showDetailDialog = ref(false);
@@ -698,7 +701,18 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  column-gap: 6px;
   margin-bottom: 16px;
+}
+.remote-link {
+  color: #6151c8;
+  background: #eae7fc;
+  border-radius: 12px;
+  padding: 9px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .segmented {
   display: flex;

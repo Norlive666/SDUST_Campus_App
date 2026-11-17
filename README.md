@@ -3,6 +3,8 @@
 > 安卓小部件添加与使用请看 [ANDROID-WIDGET.md](ANDROID-WIDGET.md)。
 >
 > 网页版需要部署同源教务代理。完整安装、部署、离线使用与验证方法请看 [WEB-DEPLOY.md](WEB-DEPLOY.md)。
+>
+> 网页课表可打开 [遥控器](REMOTE-CONTROL.md)，支持 Bluefy 蓝牙直连和 rc-tune 局域网调试。
 
 # 山科小站 (SDUST Campus App) - Android 版
 

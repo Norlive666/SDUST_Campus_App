@@ -64,6 +64,9 @@
             {{ userStore.isLoggedIn ? "验证教务登录" : "登录教务账号" }}
           </h2>
           <p>使用山东科技大学教务系统账号</p>
+          <a v-if="isWeb" class="remote-entry" href="/remote-control.html">
+            遥控器（免登录）<van-icon aria-hidden="true" name="arrow" />
+          </a>
         </div>
         <form @submit.prevent="onSubmit">
           <div class="input-group">
@@ -186,6 +189,7 @@
 </template>
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
+import { Capacitor } from "@capacitor/core";
 import { useRouter } from "vue-router";
 import { showToast, showNotify } from "vant";
 import { api } from "../services/api";
@@ -195,6 +199,7 @@ import { useTimetableStore } from "../stores/timetable";
 const router = useRouter();
 const userStore = useUserStore();
 const timetableStore = useTimetableStore();
+const isWeb = !Capacitor.isNativePlatform();
 const account = ref("");
 const password = ref("");
 const captcha = ref("");
@@ -617,6 +622,19 @@ h1 span {
   color: #8e829e;
   margin-top: 15px;
   line-height: 1.6;
+}
+.remote-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  margin-top: 8px;
+  border-radius: 12px;
+  background: #eae7fc;
+  color: #6151c8;
+  font-size: 13px;
+  font-weight: 600;
 }
 .help-toggle {
   display: flex;

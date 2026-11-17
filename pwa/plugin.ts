@@ -8,10 +8,11 @@ export function offlineShell(): Plugin {
     apply: "build",
     generateBundle(_, bundle) {
       const publicFiles = ["/logo.svg", "/manifest.webmanifest", "/icons/icon-180.png", "/icons/icon-192.png", "/icons/icon-512.png"];
-      const files = [...new Set([...Object.keys(bundle).map(name => `/${name}`), "/index.html", ...publicFiles])];
+      const htmlEntries = ["/index.html", "/remote-control.html"];
+      const files = [...new Set([...Object.keys(bundle).map(name => `/${name}`), ...htmlEntries, ...publicFiles])];
       const hash = createHash("sha256");
       for (const item of Object.values(bundle)) hash.update(item.type === "chunk" ? item.code : item.source);
-      hash.update(readFileSync("index.html"));
+      for (const file of htmlEntries) hash.update(readFileSync(file.slice(1)));
       for (const file of publicFiles) hash.update(readFileSync(`public${file}`));
       const template = readFileSync("pwa/sw.template.js", "utf8");
       hash.update(template);

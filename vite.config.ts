@@ -5,6 +5,14 @@ import { offlineShell } from './pwa/plugin';
 
 export default defineConfig({
   plugins: [vue(), offlineShell()],
+  build: {
+    rollupOptions: {
+      input: {
+        campus: path.resolve(__dirname, 'index.html'),
+        remote: path.resolve(__dirname, 'remote-control.html'),
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
