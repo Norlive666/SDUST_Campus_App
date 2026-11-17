@@ -1,5 +1,5 @@
 type Characteristic = EventTarget & {
-  properties: { write: boolean; writeWithoutResponse: boolean; notify: boolean };
+  properties: { write: boolean; writeWithoutResponse: boolean; notify: boolean; indicate: boolean };
   value?: DataView;
   writeValueWithResponse?(value: Uint8Array): Promise<void>;
   writeValueWithoutResponse?(value: Uint8Array): Promise<void>;
@@ -12,8 +12,11 @@ type Gatt = {
   disconnect(): void;
   getPrimaryService(uuid: string): Promise<{ getCharacteristic(uuid: string): Promise<Characteristic> }>;
 };
-type Device = EventTarget & { name?: string; gatt: Gatt };
-type Bluetooth = { requestDevice(options: { acceptAllDevices: true; optionalServices: string[] }): Promise<Device> };
+export type Device = EventTarget & { id?: string; name?: string; gatt?: Gatt };
+type Bluetooth = {
+  requestDevice(options: { acceptAllDevices: true; optionalServices: string[] }): Promise<Device>;
+  getDevices?(): Promise<Device[]>;
+};
 
 export type Link = {
   name: string;
@@ -25,17 +28,22 @@ export type Link = {
 const uuid = (id: string) => `0000${id}-0000-1000-8000-00805f9b34fb`;
 const bluetooth = () => (navigator as Navigator & { bluetooth?: Bluetooth }).bluetooth;
 export const supportsBluetooth = () => Boolean(bluetooth()?.requestDevice);
+export const knownBluetoothDevices = () => bluetooth()?.getDevices?.() ?? Promise.resolve([]);
+
+export function chooseBluetooth() {
+  const api = bluetooth();
+  if (!api) throw new Error("当前浏览器不支持 Web Bluetooth");
+  return api.requestDevice({ acceptAllDevices: true, optionalServices: [uuid("fff0")] });
+}
 
 export async function openBluetooth(
+  device: Device,
   signal: AbortSignal,
   lost: () => void,
   notified: (bytes: Uint8Array) => void,
-  previous?: Device,
-): Promise<Link & { device: Device }> {
-  const api = bluetooth();
-  if (!api) throw new Error("当前浏览器不支持 Web Bluetooth，请在 Bluefy 中打开此页");
-  const device = previous || await api.requestDevice({ acceptAllDevices: true, optionalServices: [uuid("fff0")] });
+): Promise<Link> {
   const gatt = device.gatt;
+  if (!gatt) throw new Error("所选设备不支持 BLE GATT");
   let rx: Characteristic | undefined;
   const onValue = () => {
     const value = rx?.value;
@@ -59,7 +67,7 @@ export async function openBluetooth(
       throw new Error("FFF2 不支持写入");
     }
     rx = await service.getCharacteristic(uuid("fff1")).catch(() => undefined);
-    if (rx?.properties.notify) {
+    if (rx && (rx.properties.notify || rx.properties.indicate)) {
       rx.addEventListener("characteristicvaluechanged", onValue);
       await rx.startNotifications();
     }
@@ -67,7 +75,6 @@ export async function openBluetooth(
     if (!gatt.connected) throw new Error("蓝牙在连接时断开");
     device.addEventListener("gattserverdisconnected", lost);
     return {
-      device,
       name: device.name || "BT630",
       async send(frame) { await write.call(tx, frame); },
       close,
@@ -86,6 +93,9 @@ export async function openDebug(token: string, signal: AbortSignal): Promise<Lin
   async function request(path: string, frame?: Uint8Array) {
     const timer = new AbortController();
     const timeout = window.setTimeout(() => timer.abort(), frame ? 240 : 1500);
+    if (signal.aborted) timer.abort();
+    const abort = () => timer.abort();
+    signal.addEventListener("abort", abort, { once: true });
     try {
       const response = await fetch(`/rc-tune/${path}`, {
         method: frame ? "POST" : "GET",
@@ -100,6 +110,7 @@ export async function openDebug(token: string, signal: AbortSignal): Promise<Lin
       return result;
     } finally {
       window.clearTimeout(timeout);
+      signal.removeEventListener("abort", abort);
     }
   }
   const health = await request("health");

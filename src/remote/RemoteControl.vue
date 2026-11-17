@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from "vue";
+import { Bluetooth, CircleGauge, Gamepad2, Link2, Settings, SlidersHorizontal, X, LayoutGrid } from "lucide-vue-next";
 import { clamp, hex, mapStick } from "./protocol";
 import type { Stick } from "./protocol";
-import { openBluetooth, openDebug, supportsBluetooth } from "./links";
-import type { Link } from "./links";
+import { chooseBluetooth, knownBluetoothDevices, openBluetooth, openDebug, supportsBluetooth } from "./links";
+import type { Device, Link } from "./links";
 import { startSession } from "./session";
 
 type Control = { id: string; title: string; note: string; channel: number; kind: "slider" | "press" | "short-long" | "cycle"; short: number; long: number; cycle: string };
 type Layout = { x: number; y: number; scale: number };
+type Box = { x: number; y: number; width: number; height: number };
 const KEY = "sdust-remote-settings-v1";
+const DEVICE_KEY = "sdust-remote-bt630";
 const padNames = ["X", "Y", "L1", "R1", "L2", "R2"];
 const padIndexes = [2, 3, 4, 5, 6, 7];
 const modes = { free: "自由", horizontal: "仅横向", vertical: "仅纵向", "four-way": "四向" };
@@ -34,8 +37,21 @@ const settings = ref("");
 const editing = ref(false);
 const selected = ref("");
 const stage = ref<HTMLElement>();
+const canvas = reactive({ width: 800, height: 360 });
+watch(stage, (element, _, cleanup) => {
+  if (!element) return;
+  const observer = new ResizeObserver(([entry]) => Object.assign(canvas, {
+    width: entry.contentRect.width, height: entry.contentRect.height,
+  }));
+  observer.observe(element);
+  cleanup(() => observer.disconnect());
+});
 const settingError = ref("");
-const sectionNames = ["连接", "摇杆", "滑块", "自定义控件", "手柄映射", "通信诊断"];
+const sections = [
+  { label: "连接与后台", icon: Link2 }, { label: "摇杆参数", icon: Gamepad2 },
+  { label: "滑块档位", icon: SlidersHorizontal }, { label: "自定义控件", icon: LayoutGrid },
+  { label: "手柄映射", icon: Gamepad2 }, { label: "通信诊断", icon: CircleGauge },
+];
 const local = Boolean(document.querySelector('meta[name="rc-tune-bridge"]'));
 const hasBluetooth = supportsBluetooth();
 const pageUrl = new URL("/remote-control.html", location.href).href;
@@ -65,7 +81,10 @@ let padReady = false;
 let gamepadTimer = 0;
 let generation = 0;
 let connectAbort: AbortController | undefined;
-let remembered: Awaited<ReturnType<typeof openBluetooth>>["device"] | undefined;
+const remembered = shallowRef<Device>();
+let holdTimer: number | undefined;
+let heldConnection = false;
+let picking = false;
 let retryTimer = 0;
 let retry = 0;
 let activeLink: Link | undefined;
@@ -73,6 +92,11 @@ let session: ReturnType<typeof startSession> | undefined;
 let drag: { key: string; pointer: number; x: number; y: number; from: Layout } | undefined;
 const shown = computed(() => editing.value ? draft.value : config.value);
 const editable = computed(() => !settings.value && !editing.value && !stopped.value);
+
+if (hasBluetooth) void knownBluetoothDevices().then(devices => {
+  const id = localStorage.getItem(DEVICE_KEY);
+  if (!remembered.value && id) remembered.value = devices.find(device => device.id === id);
+}).catch(() => {});
 
 function values(text: string) {
   return text.split(/[,，\s]+/).filter(Boolean).map(Number);
@@ -118,20 +142,20 @@ function failed(run: number, reason: unknown) {
   detail.value = reason instanceof Error ? reason.message : String(reason);
 }
 
-function retryBluetooth(run: number) {
+function retryBluetooth(run: number, reason: unknown) {
   if (run !== generation) return;
-  failed(run, "蓝牙已断开；重连后需手动使能");
-  if (retry >= 5 || document.hidden) return;
+  failed(run, reason);
+  if (!remembered.value || retry >= 5 || document.hidden) return;
   const delay = Math.min(1000 * 2 ** retry++, 5000);
   status.value = `蓝牙已断开 · ${delay / 1000} 秒后重试`;
   connection.value = "connecting";
   retryTimer = window.setTimeout(() => {
     connection.value = "idle";
-    void connect(false, true);
+    void connect(true);
   }, delay);
 }
 
-async function connect(pick = false, reconnecting = false) {
+async function connect(reconnecting = false) {
   if (connection.value !== "idle" || document.hidden) return;
   if (!reconnecting) retry = 0;
   disarm();
@@ -147,9 +171,11 @@ async function connect(pick = false, reconnecting = false) {
   try {
     let link: Link;
     if (mode.value === "ble") {
-      const ble = await openBluetooth(abort.signal, () => retryBluetooth(current), bytes => { if (current === generation) received.value = hex(bytes); }, pick ? undefined : remembered);
-      if (current === generation) remembered = ble.device;
-      link = ble;
+      const device = remembered.value;
+      if (!device) throw new Error("请先选择蓝牙设备");
+      link = await openBluetooth(device, abort.signal,
+        () => retryBluetooth(current, "蓝牙已断开，重连后需手动使能"),
+        bytes => { if (current === generation) received.value = hex(bytes); });
     } else link = await openDebug(token.value, abort.signal);
     if (current !== generation || document.hidden) {
       link.close();
@@ -157,22 +183,28 @@ async function connect(pick = false, reconnecting = false) {
       return;
     }
     activeLink = link;
-    status.value = `已连接 · ${link.name}`;
-    connection.value = "ready";
+    status.value = "正在验证第一帧";
     session = startSession(link, () => ({ axes, channels, enabled: enabled.value, stopped: stopped.value }), {
       sent(frame, note) {
         if (current !== generation) return;
+        if (connection.value !== "ready") {
+          status.value = `已连接 · ${link.name}`;
+          connection.value = "ready";
+          if (mode.value === "ble" && remembered.value?.id) {
+            try { localStorage.setItem(DEVICE_KEY, remembered.value.id); } catch { /* optional persistence */ }
+          }
+        }
         lastFrame.value = hex(frame);
         frameCount.value++;
         if (frameCount.value === 500) retry = 0;
         if (note) detail.value = note;
       },
-      failed: error => failed(current, error),
+      failed: error => mode.value === "ble" ? retryBluetooth(current, error) : failed(current, error),
     });
   } catch (error) {
     if (current === generation) {
-      if (reconnecting) {
-        retryBluetooth(current);
+      if (mode.value === "ble" && remembered.value) {
+        retryBluetooth(current, error);
         return;
       }
       connection.value = "idle";
@@ -182,6 +214,39 @@ async function connect(pick = false, reconnecting = false) {
   } finally {
     if (connectAbort === abort) connectAbort = undefined;
   }
+}
+async function pickDevice() {
+  if (!hasBluetooth || picking || editing.value || mode.value !== "ble") return;
+  picking = true;
+  disarm();
+  try {
+    const device = await chooseBluetooth();
+    if (mode.value !== "ble" || editing.value) return;
+    await disconnect();
+    remembered.value = device;
+    await connect();
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "NotFoundError")) {
+      detail.value = error instanceof Error ? error.message : String(error);
+    }
+  } finally { picking = false; }
+}
+function startHold(event: PointerEvent) {
+  heldConnection = false;
+  if (event.button !== 0 || mode.value !== "ble" || !hasBluetooth || editing.value) return;
+  holdTimer = window.setTimeout(() => { heldConnection = true; }, 500);
+}
+function clearHold() { window.clearTimeout(holdTimer); }
+function clickConnection(event: MouseEvent) {
+  if (heldConnection && event.detail !== 0) { heldConnection = false; void pickDevice(); return; }
+  if (connection.value !== "idle") { void disconnect(); return; }
+  if (mode.value === "ble" && hasBluetooth) {
+    if (remembered.value) void connect();
+    else void pickDevice();
+    return;
+  }
+  if (mode.value === "lan" && local && token.value.trim()) { void connect(); return; }
+  openSettings("连接与后台");
 }
 async function disconnect() {
   if (connection.value === "idle" || connection.value === "closing") return;
@@ -204,6 +269,7 @@ window.addEventListener("pagehide", disconnect);
 document.addEventListener("visibilitychange", leaveIfHidden);
 onBeforeUnmount(() => {
   void disconnect();
+  clearHold();
   window.removeEventListener("pagehide", disconnect);
   document.removeEventListener("visibilitychange", leaveIfHidden);
   window.clearInterval(gamepadTimer);
@@ -245,11 +311,27 @@ function assign(channel: number, value: number, source = Symbol()) {
 function assignSlider(control: Control, event: Event) {
   const raw = Number((event.target as HTMLInputElement).value);
   const slider = config.value.sliders[control.channel];
-  assign(control.channel, slider.stepped ? values(slider.values)[raw] : raw * 10);
+  assign(control.channel, slider.stepped ? values(slider.values)[raw] : raw);
 }
 function sliderIndex(control: Control) {
   const slider = shown.value.sliders[control.channel];
-  return slider.stepped ? Math.max(0, values(slider.values).indexOf(channels[control.channel])) : channels[control.channel] / 10;
+  return slider.stepped ? Math.max(0, values(slider.values).indexOf(channels[control.channel])) : channels[control.channel];
+}
+function centerSlider(control: Control) {
+  const slider = shown.value.sliders[control.channel];
+  const steps = values(slider.values);
+  assign(control.channel, slider.stepped ? steps[Math.round((steps.length - 1) / 2)] : 500);
+}
+function cycleStickMode(index: number) {
+  const options = Object.keys(modes) as Stick["mode"][];
+  const stick = config.value.sticks[index];
+  stick.mode = options[(options.indexOf(stick.mode) + 1) % options.length];
+  pointer.delete(index);
+  axes.splice(index * 2, 2, 0, 0);
+  saveConfig();
+}
+function thumbOffset(index: number, axis: number) {
+  return 50 + axes[index * 2 + axis] / shown.value.sticks[index].max * (axis === 0 ? 36 : -36);
 }
 function press(event: PointerEvent, control: Control) {
   if (!editable.value || presses.has(control.id)) return;
@@ -314,10 +396,10 @@ if (navigator.getGamepads) gamepadTimer = window.setInterval(() => {
   });
 }, 32);
 
-function openSettings() {
+function openSettings(section = "摇杆参数") {
   disarm();
   draft.value = JSON.parse(JSON.stringify(config.value));
-  settings.value = "连接";
+  settings.value = section;
   settingError.value = "";
 }
 function closeSettings() {
@@ -343,8 +425,11 @@ function applySettings() {
     if (slider.stepped && !steps.includes(binding.value)) binding.value = steps[0];
   }
   config.value = JSON.parse(JSON.stringify(draft.value));
-  try { localStorage.setItem(KEY, JSON.stringify(config.value)); } catch { /* optional persistence */ }
+  saveConfig();
   closeSettings();
+}
+function saveConfig() {
+  try { localStorage.setItem(KEY, JSON.stringify(config.value)); } catch { /* optional persistence */ }
 }
 function setLanUrl() {
   try {
@@ -359,23 +444,64 @@ function setLanUrl() {
   } catch { lanUrlError.value = "请输入电脑提供的局域网地址，例如 http://192.168.1.10:8766"; }
 }
 const layout = (key: string) => shown.value.layout[key] ?? { x: 0, y: 0, scale: 100 };
+const extraHeight = computed(() => Math.ceil(Math.max(0, shown.value.controls.length - 2) / (canvas.width >= 600 ? 3 : 2)) * 74);
+function baseBox(key: string): Box {
+  const { width } = canvas;
+  const height = canvas.height - extraHeight.value;
+  const wide = width >= 600;
+  const gap = wide ? 12 : 8;
+  const optionsWidth = wide ? 108 : 86;
+  const sliderWidth = (width - optionsWidth - 2 * gap) / 2;
+  const sliderHeight = shown.value.controls.slice(0, 2).some(control => control.note) ? 67 : 55;
+  const top = sliderHeight + 9;
+  const columnWidth = (width - (wide ? 2 : 1) * gap) / (wide ? 3 : 2);
+  const joystickHeight = wide ? (height - top) * .8 : height - top - 137;
+  if (key === "hub") return wide
+    ? { x: columnWidth + gap, y: top + Math.max(46, (height - top - 110) / 2), width: columnWidth, height: 110 }
+    : { x: 0, y: top + joystickHeight + gap, width, height: 110 };
+  if (key === "stick-0" || key === "stick-1") return {
+    x: key === "stick-0" ? 0 : width - columnWidth, y: top, width: columnWidth, height: joystickHeight,
+  };
+  if (key === "pad-0" || key === "pad-1") {
+    const card = position(`stick-${key.slice(-1)}`);
+    const side = Math.max(1, Math.min(card.width - 18, card.height - 56, 240) * .78);
+    return { x: card.x + (card.width - side) / 2, y: card.y + (card.height - side) / 2 - 4, width: side, height: side };
+  }
+  const index = shown.value.controls.findIndex(control => control.id === key);
+  if (index < 2) return { x: index === 0 ? 0 : width - sliderWidth, y: 0, width: sliderWidth, height: sliderHeight };
+  const columns = wide ? 3 : 2;
+  return { x: (index - 2) % columns * (columnWidth + gap), y: height + Math.floor((index - 2) / columns) * 74,
+    width: columnWidth, height: 64 };
+}
+function position(key: string) {
+  const base = baseBox(key);
+  const saved = layout(key);
+  const scale = Math.min(saved.scale / 100, canvas.width / base.width, canvas.height / base.height);
+  const width = base.width * scale;
+  const height = base.height * scale;
+  return { base, width, height, scale,
+    x: clamp(base.x + saved.x * canvas.width / 100, 0, canvas.width - width),
+    y: clamp(base.y + saved.y * canvas.height / 100, 0, canvas.height - height) };
+}
 function style(key: string) {
-  const { x, y, scale } = layout(key);
-  return { transform: `translate(${x}cqw, ${y}cqh) scale(${scale / 100})`, zIndex: selected.value === key ? 2 : undefined };
+  const { base, scale, x, y } = position(key);
+  return { width: `${base.width}px`, height: `${base.height}px`,
+    left: `${x}px`, top: `${y}px`, transform: `scale(${scale})` };
 }
 function dragStart(event: PointerEvent, key: string) {
   if (!editing.value || drag) return;
   selected.value = key;
   (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  drag = { key, pointer: event.pointerId, x: event.clientX, y: event.clientY, from: layout(key) };
+  const { base, x, y } = position(key);
+  const from = { scale: layout(key).scale, x: (x - base.x) / canvas.width * 100, y: (y - base.y) / canvas.height * 100 };
+  drag = { key, pointer: event.pointerId, x: event.clientX, y: event.clientY, from };
 }
 function dragMove(event: PointerEvent) {
   if (!drag || drag.pointer !== event.pointerId || !stage.value) return;
-  const box = stage.value.getBoundingClientRect();
   draft.value.layout[drag.key] = {
     ...drag.from,
-    x: clamp(drag.from.x + (event.clientX - drag.x) / box.width * 100, -55, 55),
-    y: clamp(drag.from.y + (event.clientY - drag.y) / box.height * 100, -55, 55),
+    x: clamp(drag.from.x + (event.clientX - drag.x) / canvas.width * 100, -100, 100),
+    y: clamp(drag.from.y + (event.clientY - drag.y) / canvas.height * 100, -100, 100),
   };
 }
 function dragEnd(event: PointerEvent) { if (drag?.pointer === event.pointerId) drag = undefined; }
@@ -387,101 +513,152 @@ watch(mode, () => { detail.value = ""; });
 
 <template>
   <main class="remote">
-    <header>
-      <a v-if="!local" href="/timetable" class="back">‹ 课表</a>
+    <header class="page-header">
+      <a v-if="!local" href="/timetable">‹ 课表</a>
       <h1>遥控器</h1>
-      <button v-if="!settings && !editing" type="button" @click="openSettings">功能选项</button>
-      <button v-else type="button" @click="closeSettings">取消</button>
     </header>
 
     <section v-if="!settings || editing" aria-label="控制面板">
-      <div class="connection">
-        <label>连接方式
-          <select v-model="mode" :disabled="connection !== 'idle' || editing">
-            <option value="ble">BT630 蓝牙</option>
-            <option value="lan">局域网调试</option>
-          </select>
-        </label>
-        <button v-if="mode === 'ble' && hasBluetooth || mode === 'lan' && local" type="button"
-          :disabled="connection === 'closing' || editing" @click="connection === 'idle' ? connect() : disconnect()">
-          {{ connection === "idle" ? "连接" : connection === "connecting" ? "取消连接" : "断开" }}
+      <div ref="stage" class="stage" :class="{ editing }" :style="{ '--extra-height': extraHeight + 'px' }">
+        <button type="button" class="options" :disabled="editing" @click="openSettings()">
+          <SlidersHorizontal aria-hidden="true" />功能选项
         </button>
-        <button type="button" :disabled="connection !== 'ready' || editing" :aria-pressed="enabled" @click="toggleEnable">
-          {{ enabled ? "关闭使能" : "使能" }}
-        </button>
-        <button type="button" class="stop" :aria-pressed="stopped" @click="disarm(true)">急停</button>
+        <h2 class="panel-title">{{ editing ? "编辑布局" : "操控面板" }}</h2>
+        <article v-for="index in [0, 1]" :key="'stick-' + index" class="card stick-card"
+          :class="{ selected: selected === 'stick-' + index }" :style="style('stick-' + index)"
+          @pointerdown="dragStart($event, 'stick-' + index)" @pointermove="dragMove" @pointerup="dragEnd"
+          @pointercancel="dragEnd" @lostpointercapture="dragEnd">
+          <div class="card-row">
+            <strong>{{ index === 0 ? "左摇杆" : "右摇杆" }}</strong>
+            <span class="readout">X {{ axes[index * 2] }}　Y {{ axes[index * 2 + 1] }}</span>
+          </div>
+          <div class="card-row stick-footer">
+            <small>死区 {{ shown.sticks[index].dead }}% · ±{{ shown.sticks[index].max }}</small>
+            <button type="button" :disabled="!editable" @click="cycleStickMode(index)"
+              :aria-label="(index === 0 ? '左摇杆方向：' : '右摇杆方向：') + modes[shown.sticks[index].mode]">{{ modes[shown.sticks[index].mode] }}</button>
+          </div>
+        </article>
+        <div v-for="index in [0, 1]" :key="'pad-' + index" class="stick"
+          :class="{ selected: selected === 'pad-' + index }" :style="style('pad-' + index)"
+          :aria-label="index === 0 ? '左摇杆操控区' : '右摇杆操控区'"
+          @pointerdown="editing ? dragStart($event, 'pad-' + index) : moveStick($event, index)"
+          @pointermove="editing ? dragMove($event) : moveStick($event, index)"
+          @pointerup="editing ? dragEnd($event) : releaseStick($event, index)"
+          @pointercancel="editing ? dragEnd($event) : releaseStick($event, index)"
+          @lostpointercapture="editing ? dragEnd($event) : releaseStick($event, index)">
+          <span :style="{ left: thumbOffset(index, 0) + '%', top: thumbOffset(index, 1) + '%' }"></span>
+        </div>
+        <article class="card hub" :class="{ selected: selected === 'hub' }" :style="style('hub')"
+          @pointerdown="dragStart($event, 'hub')" @pointermove="dragMove" @pointerup="dragEnd"
+          @pointercancel="dragEnd" @lostpointercapture="dragEnd">
+          <button type="button" class="connect" :aria-label="connection === 'idle' ? '连接' : connection === 'connecting' ? '取消连接' : '断开'"
+            :disabled="connection === 'closing' || editing"
+            @pointerdown="startHold" @pointerup="clearHold" @pointercancel="clearHold" @pointerleave="clearHold"
+            @contextmenu.prevent @click="clickConnection">
+            <Bluetooth v-if="mode === 'ble'" aria-hidden="true" /><Link2 v-else aria-hidden="true" />
+            <span><strong>{{ mode === "ble" ? remembered?.name || "FSC-BT630" : "局域网调试" }}</strong>
+              <small v-if="mode === 'ble'">{{ connection === "ready" ? "短按断开 · 长按选设备" : connection === "connecting" ? "短按取消 · 长按选设备" : remembered ? "短按连接 · 长按选设备" : "短按或长按选择设备" }}</small>
+              <small v-else>{{ connection === "ready" ? "点击断开" : connection === "connecting" ? "点击取消" : "点击连接" }}</small>
+            </span>
+          </button>
+          <p role="status" class="status" :title="[status, detail].filter(Boolean).join(' · ')">{{ editing ? "使能已关闭" : status }}<span v-if="detail && !editing"> · {{ detail }}</span></p>
+          <div class="card-row hub-footer">
+            <button type="button" class="enable" role="switch" aria-label="使能" :aria-checked="enabled"
+              :disabled="connection !== 'ready' || editing" @click="toggleEnable"><i aria-hidden="true"></i><span>使能</span></button>
+            <small>50 Hz</small>
+          </div>
+        </article>
+        <article v-for="control of shown.controls" :key="control.id" class="card control-card"
+          :class="{ selected: selected === control.id }" :style="style(control.id)"
+          @pointerdown="dragStart($event, control.id)" @pointermove="dragMove" @pointerup="dragEnd"
+          @pointercancel="dragEnd" @lostpointercapture="dragEnd">
+          <template v-if="control.kind === 'slider'">
+            <div class="card-row">
+              <strong>{{ control.title }}</strong>
+              <div class="slider-value"><span class="readout">{{ channels[control.channel] }}</span>
+                <button type="button" :disabled="!editable" @click="centerSlider(control)">{{ shown.sliders[control.channel].stepped ? "中档" : "50%" }}</button>
+              </div>
+            </div>
+            <div class="slider-field">
+              <input type="range" min="0" :max="shown.sliders[control.channel].stepped ? values(shown.sliders[control.channel].values).length - 1 : 1000"
+                :aria-label="control.title" :value="sliderIndex(control)" :disabled="!editable" @input="assignSlider(control, $event)">
+              <div v-if="shown.sliders[control.channel].stepped" class="ticks" aria-hidden="true">
+                <i v-for="n in values(shown.sliders[control.channel].values).length" :key="n"></i>
+              </div>
+            </div>
+          </template>
+          <button v-else type="button" class="control-key" :aria-label="control.title" :disabled="!editable"
+            @pointerdown="press($event, control)" @pointerup="release($event, control)"
+            @pointercancel="release($event, control)" @lostpointercapture="release($event, control)">{{ control.title }} · {{ channels[control.channel] }}</button>
+          <small v-if="control.note" class="control-note">{{ control.note }}</small>
+        </article>
       </div>
-      <p role="status" class="status">{{ status }}<span v-if="detail"> · {{ detail }}</span></p>
-      <p v-if="mode === 'ble' && !hasBluetooth && !editing">
-        iPhone 请将此页地址复制到 <a href="https://apps.apple.com/app/id1492822055" rel="noreferrer">Bluefy</a> 打开，再点击连接选择 BT630。
-      </p>
-      <input v-if="mode === 'ble' && !hasBluetooth && !editing" :value="pageUrl" readonly aria-label="遥控页地址" @focus="($event.target as HTMLInputElement).select()">
-      <button v-if="mode === 'ble' && hasBluetooth && remembered && connection === 'idle' && !editing" type="button" @click="connect(true)">选择其他蓝牙设备</button>
-      <label v-if="mode === 'lan' && local && !editing" class="lan-login">网页调试令牌
-        <input v-model="token" type="password" autocomplete="off" :disabled="connection !== 'idle'" placeholder="电脑启动网页调试时显示">
-      </label>
-      <form v-if="mode === 'lan' && !local && !editing" class="lan-login" @submit.prevent="setLanUrl">
-        <label>电脑的局域网调试地址<input v-model="lanUrl" type="url" placeholder="http://192.168.1.10:8766" required></label>
-        <button type="submit">打开调试页</button>
-        <span v-if="lanUrlError" role="alert">{{ lanUrlError }}</span>
-      </form>
       <div v-if="editing" class="edit-bar">
-        <span>拖动控件移动位置；选中后可缩放。</span>
         <select v-model="selected" aria-label="选中控件">
-          <option value="" disabled>选择一个控件</option>
-          <option value="stick-0">左摇杆</option><option value="stick-1">右摇杆</option>
+          <option value="pad-0">左蓝色摇杆</option><option value="pad-1">右蓝色摇杆</option>
+          <option value="stick-0">左摇杆卡片</option><option value="stick-1">右摇杆卡片</option>
+          <option value="hub">蓝牙卡片</option>
           <option v-for="control in shown.controls" :key="control.id" :value="control.id">{{ control.title }}</option>
         </select>
-        <label v-if="selected">大小 <input type="range" min="30" max="250" :value="layout(selected).scale" @input="resize"> {{ layout(selected).scale }}%</label>
+        <label>大小 <input type="range" min="30" max="250" :value="layout(selected).scale" @input="resize"> {{ layout(selected).scale }}%</label>
         <button type="button" @click="draft.layout = {}">恢复默认布局</button>
-        <button type="button" @click="applySettings">保存布局</button>
-      </div>
-      <div ref="stage" class="stage" :class="{ editing }">
-        <article v-for="index in [0, 1]" :key="index" class="card stick-card" :class="{ selected: selected === 'stick-' + index }"
-          :style="style('stick-' + index)" @pointerdown="dragStart($event, 'stick-' + index)"
-          @pointermove="dragMove" @pointerup="dragEnd" @lostpointercapture="dragEnd">
-          <strong>{{ index === 0 ? "左摇杆" : "右摇杆" }}</strong>
-          <div class="stick" :aria-label="index === 0 ? '左摇杆操控区' : '右摇杆操控区'"
-            @pointerdown="moveStick($event, index)" @pointermove="moveStick($event, index)"
-            @pointerup="releaseStick($event, index)" @pointercancel="releaseStick($event, index)"
-            @lostpointercapture="releaseStick($event, index)">
-            <span :style="{ left: 50 + axes[index * 2] / 25 + '%', top: 50 - axes[index * 2 + 1] / 25 + '%' }"></span>
-          </div>
-          <small>X {{ axes[index * 2] }} · Y {{ axes[index * 2 + 1] }} · {{ modes[shown.sticks[index].mode] }}</small>
-        </article>
-        <article v-for="control of shown.controls" :key="control.id" class="card control-card" :class="{ selected: selected === control.id }"
-          :style="style(control.id)" @pointerdown="dragStart($event, control.id)"
-          @pointermove="dragMove" @pointerup="dragEnd" @lostpointercapture="dragEnd">
-          <label v-if="control.kind === 'slider'">{{ control.title }}
-            <input type="range" min="0" :max="shown.sliders[control.channel].stepped ? values(shown.sliders[control.channel].values).length - 1 : 100"
-              :value="sliderIndex(control)" :disabled="!editable" @input="assignSlider(control, $event)">
-          </label>
-          <button v-else type="button" class="control-key" :disabled="!editable"
-            @pointerdown="press($event, control)" @pointerup="release($event, control)"
-            @pointercancel="release($event, control)" @lostpointercapture="release($event, control)">{{ control.title }}</button>
-          <small>通道 {{ control.channel + 1 }} · {{ channels[control.channel] }} <span v-if="control.note"> · {{ control.note }}</span></small>
-        </article>
+        <button type="button" @click="closeSettings">取消</button>
+        <button type="button" class="primary" @click="applySettings">保存布局</button>
       </div>
     </section>
 
-    <section v-else class="settings" aria-label="功能选项">
-      <nav aria-label="设置分类">
-        <button v-for="name in sectionNames" :key="name" type="button" :aria-pressed="settings === name" @click="settings = name">{{ name }}</button>
-      </nav>
-      <div v-if="settings === '连接'" class="settings-section">
-        <p>蓝牙模式使用 BT630 的 FFF0 服务、FFF2 写入和 FFF1 通知。局域网调试由电脑上的 rc-tune 通过 SWD 读写。</p>
-        <p>离开页面或切换到后台会关闭使能并断开；重新连接后需要手动使能。</p>
-        <button type="button" @click="editing = true">编辑布局</button>
+    <section v-else class="settings" aria-label="面板设置">
+      <div class="settings-header">
+        <Settings aria-hidden="true" /><h2>面板设置</h2>
+        <button type="button" @click="selected = 'pad-0'; editing = true">编辑布局</button>
+        <button type="button" class="settings-close" aria-label="关闭设置" @click="closeSettings"><X aria-hidden="true" /></button>
       </div>
-      <div v-else-if="settings === '摇杆'" class="settings-section">
+      <nav aria-label="设置分类">
+        <button v-for="item in sections" :key="item.label" type="button" :aria-pressed="settings === item.label"
+          @click="settings = item.label"><component :is="item.icon" aria-hidden="true" />{{ item.label }}</button>
+      </nav>
+      <div class="settings-scroll">
+        <h3>{{ settings }}</h3>
+        <div v-if="settings === '连接与后台'" class="settings-section">
+          <fieldset>
+            <legend>调试链路</legend>
+            <label>连接方式
+              <select v-model="mode" :disabled="connection !== 'idle'">
+                <option value="ble">BT630 蓝牙</option>
+                <option value="lan">局域网调试</option>
+              </select>
+            </label>
+            <template v-if="mode === 'ble'">
+              <button v-if="hasBluetooth" type="button" @click="pickDevice">选择蓝牙设备</button>
+              <template v-else>
+                <p>请用支持 Web Bluetooth 的浏览器打开。iPhone 可使用 <a href="https://apps.apple.com/app/id1492822055" rel="noreferrer">Bluefy</a>。</p>
+                <input :value="pageUrl" readonly aria-label="遥控页地址" @focus="($event.target as HTMLInputElement).select()">
+              </template>
+            </template>
+            <template v-else-if="local">
+              <label>网页调试令牌<input v-model="token" type="password" autocomplete="off" :disabled="connection !== 'idle'" placeholder="电脑启动网页调试时显示"></label>
+              <button type="button" :disabled="connection === 'closing'" @click="connection === 'idle' ? connect() : disconnect()">
+                {{ connection === "idle" ? "连接" : connection === "connecting" ? "取消连接" : "断开" }}
+              </button>
+            </template>
+            <form v-else class="lan-login" @submit.prevent="setLanUrl">
+              <label>电脑的局域网调试地址<input v-model="lanUrl" type="url" placeholder="http://192.168.1.10:8766" required></label>
+              <button type="submit">打开调试页</button>
+              <span v-if="lanUrlError" role="alert">{{ lanUrlError }}</span>
+            </form>
+            <p v-if="detail">{{ status }} · {{ detail }}</p>
+          </fieldset>
+          <p class="settings-hint">网页切到后台时会断开。返回后可重新连接，连接成功后需手动使能。</p>
+        </div>
+      <div v-else-if="settings === '摇杆参数'" class="settings-section">
         <fieldset v-for="(stick, index) of draft.sticks" :key="index">
           <legend>{{ index === 0 ? "左摇杆" : "右摇杆" }}</legend>
           <label>方向<select v-model="stick.mode"><option v-for="(name, key) in modes" :key="key" :value="key">{{ name }}</option></select></label>
-          <label>死区（0–30%）<input v-model.number="stick.dead" type="number" min="0" max="30"></label>
+          <label>死区 {{ stick.dead }}%<input v-model.number="stick.dead" type="range" min="0" max="30"></label>
           <label>最大值（1–1000）<input v-model.number="stick.max" type="number" min="1" max="1000"></label>
         </fieldset>
       </div>
-      <div v-else-if="settings === '滑块'" class="settings-section">
+      <div v-else-if="settings === '滑块档位'" class="settings-section">
         <fieldset v-for="(slider, index) of draft.sliders" :key="index">
           <legend>通道 {{ index + 1 }}</legend>
           <label>分档 <input v-model="slider.stepped" type="checkbox"></label>
@@ -520,8 +697,10 @@ watch(mode, () => { detail.value = ""; });
         <pre v-if="readback">{{ readback }}</pre>
         <small>蓝牙写入完成不代表 STM32 已收到；SWD 回读一致只表示探针读到了写入值。</small>
       </div>
+      </div>
       <footer>
         <span v-if="settingError" role="alert">{{ settingError }}</span>
+        <span v-else class="settings-hint">未应用的修改不会保存</span>
         <button type="button" @click="draft = defaults(); settingError = ''">恢复默认设置</button>
         <button type="button" class="primary" @click="applySettings">应用设置</button>
       </footer>
@@ -531,39 +710,230 @@ watch(mode, () => { detail.value = ""; });
 </template>
 
 <style>
-:root{font-family:system-ui,sans-serif;color:#20243a;background:#f1f0fa;color-scheme:light}
-*{box-sizing:border-box}
-body{margin:0}
-.remote{max-width:1040px;margin:auto;padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) max(20px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left))}
-.remote header,.connection,.edit-bar,.remote footer,.lan-login{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
-.remote header h1{margin:0 auto 0 0;font-size:1.35rem}
-.remote header{padding-block:8px 16px}
-.remote a{color:#5344ae}
-.remote button,.remote input:not([type=range]),.remote select{font:inherit;border:1px solid #d9d7e9;border-radius:9px;background:white;color:inherit;padding:8px;min-height:38px;min-width:0}
-.remote button{font-weight:600;cursor:pointer}
-.remote button:disabled{opacity:.48;cursor:default}
-.remote button[aria-pressed=true],.remote .primary{background:#5949b9;color:white;border-color:#5949b9}
-.remote button.stop{color:#ab194a;border-color:#e6a9c0}
-.remote button.stop[aria-pressed=true]{color:white;background:#a51945;border-color:#a51945}
-.remote label{display:inline-flex;align-items:center;gap:7px;flex-wrap:wrap}
-.remote input[type=range]{accent-color:#6250c3;max-width:100%;margin:0}
-.lan-login input{min-width:min(65vw,230px)!important}
-.status{font-size:.92rem;color:#4c456d;min-height:1.3em;overflow-wrap:anywhere}
-.stage{container-type:size;display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;height:min(70vh,650px);min-height:285px;margin-top:10px;overflow:auto;padding:4px}
-.card{background:white;border:1px solid #e3e0f2;border-radius:14px;padding:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;text-align:center;min-width:0}
-.card small{color:#544c69;overflow-wrap:anywhere}
-.stick{width:min(100%,clamp(105px,37vh,180px));aspect-ratio:1;position:relative;touch-action:none;user-select:none;background:linear-gradient(90deg,transparent 49.5%,#d5d1f1 50%,transparent 51%),linear-gradient(0deg,#eeebff 49%,#d5d1f1 50%,#eeebff 51%);border:1px solid #d5d1f1;border-radius:14px}
-.stick span{position:absolute;width:26%;aspect-ratio:1;background:#6a58ce;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none}
-.control-card label{justify-content:center}
-.control-key{touch-action:none;user-select:none}
-.stage.editing .card{touch-action:none;user-select:none;outline:1px dashed #9283d6;cursor:grab}
-.stage.editing .card.selected{outline:2px solid #5949b9}
-.edit-bar{font-size:.85rem;padding-block:5px}
-.settings nav,.settings-section{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
-.settings-section{background:white;border-radius:14px;padding:12px;align-items:start}
-.settings-section p,.settings-section pre{width:100%;margin:5px 0;overflow-wrap:anywhere}
-.settings-section fieldset{border:1px solid #ddd8ef;border-radius:9px;display:grid;gap:6px;max-width:100%;min-width:0}
-.settings-section input[type=number]{max-width:90px}
-.settings-section pre{overflow:auto;white-space:pre-wrap}
-.remote [role=alert]{color:#a51945}
+:root {
+  font-family: system-ui, sans-serif;
+  color: #1e293b;
+  background: #f4f7fb;
+  color-scheme: light;
+  --accent: #0288d1;
+  --muted: #64748b;
+  --line: #e6edf5;
+  --pad: #e9f1fa;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+.remote {
+  max-width: 1400px;
+  margin: auto;
+  padding: env(safe-area-inset-top) max(10px, env(safe-area-inset-right))
+    max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+}
+.remote a { color: var(--accent); }
+.remote button, .remote input:not([type=range]), .remote select {
+  font: inherit;
+  color: inherit;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 9px;
+}
+.remote button { font-weight: 600; cursor: pointer; }
+.remote button:disabled { opacity: .5; cursor: default; }
+.remote .primary { color: white; background: var(--accent); border-color: var(--accent); }
+.remote label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.remote input[type=range] { max-width: 100%; margin: 0; accent-color: var(--accent); }
+
+.page-header { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+.page-header h1 { margin: 0; font-size: .86rem; font-weight: 600; }
+.page-header a { font-size: .8rem; text-decoration: none; }
+.page-header h1, .panel-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.stage {
+  --panel-height: max(300px, calc(100dvh - 46px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  position: relative;
+  isolation: isolate;
+  height: calc(var(--panel-height) + var(--extra-height, 0px));
+  overflow: hidden;
+}
+.stage.editing { --panel-height: max(300px, calc(100dvh - 105px - env(safe-area-inset-top) - env(safe-area-inset-bottom))); }
+.stage > .options {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  top: 6px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 108px;
+  height: 44px;
+  padding: 4px;
+  border-radius: 16px;
+  border-color: #7b8794;
+  white-space: nowrap;
+  font-size: .79rem;
+}
+.options svg { width: 15px; color: var(--accent); }
+.panel-title {
+  position: absolute;
+  left: 34%;
+  right: 34%;
+  top: 72px;
+  margin: 0;
+  text-align: center;
+  font-size: 1.1rem;
+}
+.stage .card, .stage .stick { position: absolute; transform-origin: top left; }
+.card {
+  min-width: 0;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: 0 1px 3px #1e293b26;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+.card-row { display: flex; justify-content: space-between; align-items: center; min-width: 0; gap: 4px; }
+.card-row strong, .control-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-row strong { font-size: .79rem; }
+.card .readout { color: var(--muted); font: .72rem ui-monospace, monospace; white-space: nowrap; }
+.card small { color: var(--muted); font-size: .66rem; }
+.stick-card { justify-content: space-between; }
+.stick-footer { align-items: end; }
+.stick-footer button { min-height: 30px; border-radius: 16px; color: var(--accent); font-size: .67rem; white-space: nowrap; }
+.stick {
+  touch-action: none;
+  user-select: none;
+  z-index: 2;
+  border: 1px solid #dae6f2;
+  border-radius: 16%;
+  background:
+    linear-gradient(90deg, transparent 49.6%, #d8e3ed 50%, transparent 50.4%),
+    linear-gradient(0deg, transparent 49.6%, #d8e3ed 50%, transparent 50.4%), var(--pad);
+}
+.stick::before { content: ""; position: absolute; inset: 16%; border: 1px solid #e3edf6; border-radius: 16%; pointer-events: none; }
+.stick span {
+  position: absolute;
+  width: 29%;
+  aspect-ratio: 1;
+  background: radial-gradient(circle at 34% 28%, #00b4ed, #0288d1 57%, #0369aa 95%);
+  border: 3px solid white;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.hub, .control-card { z-index: 3; }
+.hub { justify-content: space-between; }
+.hub .connect {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: left;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 14px;
+  background: #dff4fd;
+  user-select: none;
+  touch-action: manipulation;
+}
+.connect svg { width: 19px; flex: none; color: var(--accent); }
+.connect span { min-width: 0; }
+.connect strong, .connect small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connect strong { font-size: .82rem; }
+.status {
+  color: var(--muted);
+  font-size: .7rem;
+  margin: 0;
+  text-align: center;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.hub-footer { border-top: 1px solid var(--line); }
+.hub-footer .enable { display: inline-flex; gap: 4px; align-items: center; border: none; font-size: .72rem; padding: 0; }
+.enable i { display: inline-flex; align-items: center; width: 42px; height: 25px; padding: 3px; border: 1px solid #c9d3de; background: #f1f5f9; border-radius: 20px; }
+.enable i::before { content: ""; width: 17px; height: 17px; border-radius: 50%; background: #94a3b8; }
+.enable[aria-checked=true] i { justify-content: end; background: var(--accent); border-color: var(--accent); }
+.enable[aria-checked=true] i::before { background: white; }
+.hub-footer small { font-family: ui-monospace, monospace; }
+.control-card { padding: 4px 9px; justify-content: center; gap: 1px; }
+.slider-value { display: flex; gap: 3px; align-items: center; white-space: nowrap; }
+.slider-value .readout { color: var(--accent); font-weight: 700; }
+.slider-value button { min-height: 23px; font-size: .65rem; color: var(--muted); border: none; padding: 1px 4px; }
+.slider-field { position: relative; height: 24px; }
+.slider-field input {
+  position: relative;
+  appearance: none;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  cursor: pointer;
+}
+.slider-field::before { content: ""; position: absolute; inset: 5px 9px; border-radius: 10px; background: var(--pad); }
+.slider-field input::-webkit-slider-thumb { appearance: none; width: 20px; height: 20px; border: 3px solid white; background: var(--accent); border-radius: 50%; }
+.slider-field input::-moz-range-thumb { width: 14px; height: 14px; border: 3px solid white; background: var(--accent); border-radius: 50%; }
+.slider-field input:disabled { opacity: .52; }
+.ticks { position: absolute; inset: 0 9px; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+.ticks i { width: 2px; height: 6px; background: white; }
+.control-card:has(.control-note) { padding-block: 2px; }
+.control-card .control-key { min-height: 30px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; touch-action: none; user-select: none; background: var(--pad); border: 0; font-size: .74rem; }
+.control-note { line-height: 1.15; }
+.stage.editing .card, .stage.editing .stick { touch-action: none; user-select: none; outline: 1px dashed #8ebad3; cursor: grab; }
+.stage.editing .selected { z-index: 5; outline: 2px solid var(--accent); }
+.stage.editing .card > * { pointer-events: none; }
+.edit-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px; margin-top: 6px; padding: 5px 8px; background: white; border: 1px solid var(--line); border-radius: 12px; font-size: .75rem; }
+.edit-bar label { flex: 1; min-width: 130px; }
+.edit-bar input[type=range] { flex: 1; min-width: 45px; }
+
+.settings {
+  display: grid;
+  grid-template: auto minmax(0, 1fr) auto / clamp(128px, 22vw, 172px) minmax(0, 1fr);
+  height: max(260px, calc(100dvh - 46px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.settings-header { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--line); }
+.settings-header h2 { flex: 1; font-size: 1.1rem; margin: 0; }
+.settings-header svg { width: 19px; }
+.settings-header .settings-close { display: grid; place-items: center; min-width: 34px; padding: 2px; border-color: transparent; }
+.settings nav { display: flex; flex-direction: column; gap: 4px; padding: 7px; border-right: 1px solid var(--line); overflow: auto; }
+.settings nav button { display: flex; gap: 6px; align-items: center; text-align: left; border-color: transparent; white-space: nowrap; font-size: .83rem; }
+.settings nav button[aria-pressed=true] { color: var(--accent); background: #e3f3ff; }
+.settings nav svg { width: 17px; height: 17px; flex: none; }
+.settings-scroll { min-width: 0; background: #f4f7fb; padding: 10px; overflow: auto; }
+.settings-scroll h3 { margin: 0 0 8px; font-size: 1rem; }
+.settings-section { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 8px; align-items: start; font-size: .81rem; }
+.settings-section fieldset { min-width: 0; display: grid; gap: 7px; margin: 0; padding: 8px; background: white; border: 1px solid var(--line); border-radius: 12px; }
+.settings-section legend { font-weight: 700; }
+.settings-section input[type=number] { max-width: 90px; }
+.settings-section label input, .settings-section label select { max-width: 100%; }
+.settings-section p, .settings-section pre, .settings-section > small { grid-column: 1 / -1; margin: 4px 0; overflow-wrap: anywhere; }
+.settings-section pre { max-width: 100%; overflow: auto; white-space: pre-wrap; }
+.settings footer { grid-column: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 5px; padding: 6px 8px; border-top: 1px solid var(--line); font-size: .75rem; }
+.settings footer span { flex: 1; }
+.settings-hint { color: var(--muted); }
+.remote [role=alert] { color: #b42338; }
+.lan-login { display: grid; gap: 6px; }
+@media (max-width: 619px) {
+  .stage { --panel-height: max(395px, calc(min(78dvh, 620px) - env(safe-area-inset-top))); }
+  .stage.editing { --panel-height: max(395px, calc(min(74dvh, 580px) - env(safe-area-inset-top))); }
+  .stage > .options { width: 86px; font-size: .73rem; }
+  .panel-title { display: none; }
+  .settings { grid-template: auto auto minmax(0, 1fr) auto / minmax(0, 1fr); }
+  .settings nav { flex-direction: row; border: 0; border-bottom: 1px solid var(--line); }
+  .settings footer { grid-column: 1; }
+}
 </style>
